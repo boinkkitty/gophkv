@@ -2,13 +2,11 @@ package keyval
 
 import (
 	"bytes"
-
-	"github.com/boinkkitty/gophkv/log"
 )
 
 type KV struct {
 	mem map[string][]byte
-	log log.Log
+	log Log
 }
 
 func (kv *KV) Open() error {
@@ -21,7 +19,7 @@ func (kv *KV) Open() error {
 		eof, err := kv.log.Read(&entry)
 		if err != nil {
 			return err
-		} else if eof != nil {
+		} else if eof {
 			break
 		}
 
@@ -30,28 +28,11 @@ func (kv *KV) Open() error {
 		} else {
 			kv.mem[string(entry.key)] = entry.val
 		}
-		kv.Set(entry.key, entry.val)
-	}
-
-	for {
-		ent := Entry{}
-		eof, err := kv.log.Read(&ent)
-		if err != nil {
-			return err
-		} else if eof {
-			break
-		}
-
-		if ent.deleted {
-			delete(kv.mem, string(ent.key))
-		} else {
-			kv.mem[string(ent.key)] = ent.val
-		}
 	}
 	return nil
 }
 
-func (kv *KV) Close() error { return nil }
+func (kv *KV) Close() error { return kv.log.Close() }
 
 // Get gets the value
 func (kv *KV) Get(key []byte) ([]byte, bool, error) {
@@ -62,14 +43,32 @@ func (kv *KV) Get(key []byte) ([]byte, bool, error) {
 // Set reports whether changed
 func (kv *KV) Set(key []byte, val []byte) (bool, error) {
 	prev, exist := kv.mem[string(key)]
-	kv.mem[string(key)] = val
 	updated := !exist || !bytes.Equal(prev, val)
+	if updated {
+		if err := kv.log.Write(&Entry{
+			key:     key,
+			val:     val,
+			deleted: false,
+		}); err != nil {
+			return false, err
+		}
+		kv.mem[string(key)] = val
+	}
 	return updated, nil
 }
 
 // Del reports whether changed
 func (kv *KV) Del(key []byte) (bool, error) {
-	_, deleted := kv.mem[string(key)]
-	delete(kv.mem, string(key))
+	val, deleted := kv.mem[string(key)]
+	if deleted {
+		if err := kv.log.Write(&Entry{
+			key:     key,
+			val:     val,
+			deleted: true,
+		}); err != nil {
+			return false, err
+		}
+		delete(kv.mem, string(key))
+	}
 	return deleted, nil
 }

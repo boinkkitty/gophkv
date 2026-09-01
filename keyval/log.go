@@ -1,10 +1,8 @@
-package log
+package keyval
 
 import (
 	"io"
 	"os"
-
-	"github.com/boinkkitty/gophkv/keyval"
 )
 
 type Log struct {
@@ -21,12 +19,12 @@ func (log *Log) Close() error {
 	return log.fp.Close()
 }
 
-func (log *Log) Write(ent *keyval.Entry) error {
+func (log *Log) Write(ent *Entry) error {
 	_, err := log.fp.Write(ent.Encode())
 	return err
 }
 
-func (log *Log) Read(ent *keyval.Entry) (eof bool, err error) {
+func (log *Log) Read(ent *Entry) (eof bool, err error) {
 	err = ent.Decode(log.fp)
 	if err == io.EOF {
 		return true, nil
