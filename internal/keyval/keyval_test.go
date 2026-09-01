@@ -11,10 +11,10 @@ import (
 // TestKVBasic verifies basic set, get, delete, and reopen behavior.
 func TestKVBasic(t *testing.T) {
 	kv := KV{}
-	kv.log.FileName = ".test_db"
-	defer os.Remove(kv.log.FileName)
+	kv.Log.FileName = ".test_db"
+	defer os.Remove(kv.Log.FileName)
 
-	os.Remove(kv.log.FileName)
+	os.Remove(kv.Log.FileName)
 	err := kv.Open()
 	assert.Nil(t, err)
 	defer kv.Close()
@@ -54,10 +54,10 @@ func TestKVBasic(t *testing.T) {
 // TestKVUpdateMode verifies insert-only, update-only, and upsert semantics.
 func TestKVUpdateMode(t *testing.T) {
 	kv := KV{}
-	kv.log.FileName = ".test_db"
-	defer os.Remove(kv.log.FileName)
+	kv.Log.FileName = ".test_db"
+	defer os.Remove(kv.Log.FileName)
 
-	os.Remove(kv.log.FileName)
+	os.Remove(kv.Log.FileName)
 	err := kv.Open()
 	assert.Nil(t, err)
 	defer kv.Close()
@@ -87,11 +87,11 @@ func TestKVUpdateMode(t *testing.T) {
 // TestKVRecovery verifies recovery from truncated or corrupted log tails.
 func TestKVRecovery(t *testing.T) {
 	kv := KV{}
-	kv.log.FileName = ".test_db"
-	defer os.Remove(kv.log.FileName)
+	kv.Log.FileName = ".test_db"
+	defer os.Remove(kv.Log.FileName)
 
 	prepare := func() {
-		os.Remove(kv.log.FileName)
+		os.Remove(kv.Log.FileName)
 
 		err := kv.Open()
 		assert.Nil(t, err)
@@ -105,7 +105,7 @@ func TestKVRecovery(t *testing.T) {
 
 	prepare()
 	// simulate truncated log
-	fp, _ := os.OpenFile(kv.log.FileName, os.O_RDWR, 0o644)
+	fp, _ := os.OpenFile(kv.Log.FileName, os.O_RDWR, 0o644)
 	st, _ := fp.Stat()
 	fp.Truncate(st.Size() - 1)
 	fp.Close()
@@ -121,7 +121,7 @@ func TestKVRecovery(t *testing.T) {
 
 	prepare()
 	// simulate bad checksum
-	fp, _ = os.OpenFile(kv.log.FileName, os.O_RDWR, 0o644)
+	fp, _ = os.OpenFile(kv.Log.FileName, os.O_RDWR, 0o644)
 	st, _ = fp.Stat()
 	fp.WriteAt([]byte{0}, st.Size()-1)
 	fp.Close()

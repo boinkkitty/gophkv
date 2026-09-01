@@ -6,18 +6,18 @@ import (
 
 type KV struct {
 	mem map[string][]byte
-	log Log
+	Log Log
 }
 
 // Open opens the log and rebuilds the in-memory index from it.
 func (kv *KV) Open() error {
-	if err := kv.log.Open(); err != nil {
+	if err := kv.Log.Open(); err != nil {
 		return err
 	}
 	kv.mem = map[string][]byte{} // empty
 	for {
 		entry := Entry{}
-		eof, err := kv.log.Read(&entry)
+		eof, err := kv.Log.Read(&entry)
 		if err != nil {
 			return err
 		} else if eof {
@@ -34,7 +34,7 @@ func (kv *KV) Open() error {
 }
 
 // Close closes the backing log file.
-func (kv *KV) Close() error { return kv.log.Close() }
+func (kv *KV) Close() error { return kv.Log.Close() }
 
 // Get returns the value stored for key, if present.
 func (kv *KV) Get(key []byte) ([]byte, bool, error) {
@@ -67,7 +67,7 @@ func (kv *KV) SetEx(key []byte, val []byte, mode UpdateMode) (bool, error) {
 		panic("unreachable")
 	}
 	if updated {
-		if err = kv.log.Write(&Entry{key: key, val: val}); err != nil {
+		if err = kv.Log.Write(&Entry{key: key, val: val}); err != nil {
 			return false, err
 		}
 		kv.mem[string(key)] = val
@@ -84,7 +84,7 @@ func (kv *KV) Set(key []byte, val []byte) (bool, error) {
 func (kv *KV) Del(key []byte) (bool, error) {
 	_, deleted := kv.mem[string(key)]
 	if deleted {
-		if err := kv.log.Write(&Entry{
+		if err := kv.Log.Write(&Entry{
 			key:     key,
 			deleted: true,
 		}); err != nil {
