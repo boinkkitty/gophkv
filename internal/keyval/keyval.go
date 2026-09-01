@@ -42,21 +42,42 @@ func (kv *KV) Get(key []byte) ([]byte, bool, error) {
 	return val, ok, nil
 }
 
-// Set stores val for key and reports whether the value changed.
-func (kv *KV) Set(key []byte, val []byte) (bool, error) {
+type UpdateMode int
+
+const (
+	ModeUpsert UpdateMode = 0 // insert or update
+	ModeInsert UpdateMode = 1 // insert new
+	ModeUpdate UpdateMode = 2 // update existing
+)
+
+func (kv *KV) SetEx(key []byte, val []byte, mode UpdateMode) (bool, error) {
 	prev, exist := kv.mem[string(key)]
-	updated := !exist || !bytes.Equal(prev, val)
+
+	var updated bool
+	var err error
+
+	switch mode {
+	case ModeUpsert:
+		updated = !exist || !bytes.Equal(prev, val)
+	case ModeInsert:
+		updated = !exist
+	case ModeUpdate:
+		updated = exist && !bytes.Equal(prev, val)
+	default:
+		panic("unreachable")
+	}
 	if updated {
-		if err := kv.log.Write(&Entry{
-			key:     key,
-			val:     val,
-			deleted: false,
-		}); err != nil {
+		if err = kv.log.Write(&Entry{key: key, val: val}); err != nil {
 			return false, err
 		}
 		kv.mem[string(key)] = val
 	}
-	return updated, nil
+	return updated, err
+}
+
+// Set stores val for key and reports whether the value changed.
+func (kv *KV) Set(key []byte, val []byte) (bool, error) {
+	return kv.SetEx(key, val, ModeUpsert)
 }
 
 // Del removes key and reports whether anything was deleted.
