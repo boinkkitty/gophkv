@@ -59,11 +59,10 @@ func (kv *KV) Set(key []byte, val []byte) (bool, error) {
 
 // Del reports whether changed
 func (kv *KV) Del(key []byte) (bool, error) {
-	val, deleted := kv.mem[string(key)]
+	_, deleted := kv.mem[string(key)]
 	if deleted {
 		if err := kv.log.Write(&Entry{
 			key:     key,
-			val:     val,
 			deleted: true,
 		}); err != nil {
 			return false, err
