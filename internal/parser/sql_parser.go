@@ -1,7 +1,11 @@
 package parser
 
 import (
+	"errors"
+	"strconv"
 	"strings"
+
+	"github.com/boinkkitty/gophkv/internal/table"
 )
 
 type Parser struct {
@@ -66,6 +70,63 @@ func (p *Parser) tryName() (string, bool) {
 	}
 	p.pos = cur
 	return p.buf[start:cur], true
+}
+
+func (p *Parser) parseValue(out *table.Cell) error {
+	p.skipSpaces()
+	if p.pos >= len(p.buf) {
+		return errors.New("expect value")
+	}
+	ch := p.buf[p.pos]
+	if ch == '"' || ch == '\'' {
+		return p.parseString(out)
+	} else if isDigit(ch) || ch == '-' || ch == '+' {
+		return p.parseInt(out)
+	} else {
+		return errors.New("expect value")
+	}
+}
+
+func (p *Parser) parseString(out *table.Cell) error {
+	quote := p.buf[p.pos]
+	cur := p.pos + 1
+	for cur < len(p.buf) {
+		ch := p.buf[cur]
+		if ch == '\\' {
+			cur++
+			if cur < len(p.buf) && (p.buf[cur] == '"' || p.buf[cur] == '\'') {
+				out.Str = append(out.Str, p.buf[cur])
+				cur++
+			} else {
+				return errors.New("bad escape")
+			}
+		} else if ch == quote {
+			out.Type = table.TypeStr
+			p.pos = cur + 1
+			return nil
+		} else {
+			out.Str = append(out.Str, p.buf[cur])
+			cur++
+		}
+	}
+	return errors.New("string is not terminated")
+}
+
+func (p *Parser) parseInt(out *table.Cell) (err error) {
+	start, cur := p.pos, p.pos
+	if p.buf[cur] == '-' || p.buf[cur] == '+' {
+		cur++
+	}
+	for cur < len(p.buf) && isDigit(p.buf[cur]) {
+		cur++
+	}
+
+	if out.I64, err = strconv.ParseInt(p.buf[start:cur], 10, 64); err != nil {
+		return err
+	}
+	out.Type = table.TypeI64
+	p.pos = cur
+	return nil
 }
 
 func (p *Parser) isEnd() bool {

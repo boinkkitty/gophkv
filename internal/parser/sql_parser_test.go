@@ -3,6 +3,7 @@ package parser
 import (
 	"testing"
 
+	"github.com/boinkkitty/gophkv/internal/table"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -23,4 +24,19 @@ func TestParseKeyword(t *testing.T) {
 	assert.False(t, p.tryKeyword("sel"))
 	assert.True(t, p.tryKeyword("SELECT"))
 	assert.True(t, p.tryKeyword("hello") && p.isEnd())
+}
+
+func testParseValue(t *testing.T, s string, ref table.Cell) {
+	p := NewParser(s)
+	out := table.Cell{}
+	err := p.parseValue(&out)
+	assert.Nil(t, err)
+	assert.True(t, p.isEnd())
+	assert.Equal(t, ref, out)
+}
+
+func TestParseValue(t *testing.T) {
+	testParseValue(t, " -123 ", table.Cell{Type: table.TypeI64, I64: -123})
+	testParseValue(t, ` 'abc\'\"d' `, table.Cell{Type: table.TypeStr, Str: []byte("abc'\"d")})
+	testParseValue(t, ` "abc\'\"d" `, table.Cell{Type: table.TypeStr, Str: []byte("abc'\"d")})
 }
