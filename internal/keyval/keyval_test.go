@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestKVBasic verifies basic set, get, delete, and reopen behavior.
 func TestKVBasic(t *testing.T) {
 	kv := KV{}
 	kv.log.FileName = ".test_db"
@@ -50,6 +51,7 @@ func TestKVBasic(t *testing.T) {
 	assert.True(t, string(val) == "v2" && ok && err == nil)
 }
 
+// TestKVRecovery verifies recovery from truncated or corrupted log tails.
 func TestKVRecovery(t *testing.T) {
 	kv := KV{}
 	kv.log.FileName = ".test_db"
@@ -101,6 +103,7 @@ func TestKVRecovery(t *testing.T) {
 	kv.Close()
 }
 
+// TestEntryEncode verifies entry binary encoding and decoding.
 func TestEntryEncode(t *testing.T) {
 	ent := Entry{key: []byte("k1"), val: []byte("xxx")}
 	data := []byte{0xe9, 0xec, 0x4d, 0x9e, 2, 0, 0, 0, 3, 0, 0, 0, 0, 'k', '1', 'x', 'x', 'x'}

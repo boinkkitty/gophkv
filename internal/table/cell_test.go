@@ -1,4 +1,4 @@
-package cell
+package table
 
 import (
 	"testing"
@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestTableCell verifies cell encoding and decoding for supported types.
 func TestTableCell(t *testing.T) {
 	cell := Cell{Type: TypeI64, I64: -2}
 	data := []byte{0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}

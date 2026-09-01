@@ -9,6 +9,7 @@ type KV struct {
 	log Log
 }
 
+// Open opens the log and rebuilds the in-memory index from it.
 func (kv *KV) Open() error {
 	if err := kv.log.Open(); err != nil {
 		return err
@@ -32,15 +33,16 @@ func (kv *KV) Open() error {
 	return nil
 }
 
+// Close closes the backing log file.
 func (kv *KV) Close() error { return kv.log.Close() }
 
-// Get gets the value
+// Get returns the value stored for key, if present.
 func (kv *KV) Get(key []byte) ([]byte, bool, error) {
 	val, ok := kv.mem[string(key)]
 	return val, ok, nil
 }
 
-// Set reports whether changed
+// Set stores val for key and reports whether the value changed.
 func (kv *KV) Set(key []byte, val []byte) (bool, error) {
 	prev, exist := kv.mem[string(key)]
 	updated := !exist || !bytes.Equal(prev, val)
@@ -57,7 +59,7 @@ func (kv *KV) Set(key []byte, val []byte) (bool, error) {
 	return updated, nil
 }
 
-// Del reports whether changed
+// Del removes key and reports whether anything was deleted.
 func (kv *KV) Del(key []byte) (bool, error) {
 	_, deleted := kv.mem[string(key)]
 	if deleted {

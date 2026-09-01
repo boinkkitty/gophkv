@@ -1,4 +1,4 @@
-package cell
+package table
 
 import (
 	"encoding/binary"
@@ -19,7 +19,9 @@ type Cell struct {
 	Str  []byte
 }
 
-// Appends cell val to toAppend array
+var ErrMoreData = errors.New("expect more data")
+
+// Encode appends the cell's binary form to toAppend.
 func (cell *Cell) Encode(toAppend []byte) []byte {
 	switch cell.Type {
 	case TypeI64:
@@ -32,21 +34,22 @@ func (cell *Cell) Encode(toAppend []byte) []byte {
 	}
 }
 
+// Decode fills the cell from data and returns any remaining bytes.
 func (cell *Cell) Decode(data []byte) (rest []byte, err error) {
 	switch cell.Type {
 	case TypeI64:
 		if len(data) < 8 {
-			return data, errors.New("expect more data")
+			return data, ErrMoreData
 		}
 		cell.I64 = int64(binary.LittleEndian.Uint64(data[:8]))
 		return data[8:], nil
 	case TypeStr:
 		if len(data) < 4 {
-			return data, errors.New("expect more data")
+			return data, ErrMoreData
 		}
 		size := int(binary.LittleEndian.Uint32(data[:4]))
 		if len(data) < 4+size {
-			return data, errors.New("expect more data")
+			return data, ErrMoreData
 		}
 		cell.Str = slices.Clone(data[4 : 4+size])
 		return data[4+size:], nil

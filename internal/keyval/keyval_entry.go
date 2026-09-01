@@ -13,9 +13,7 @@ type Entry struct {
 	deleted bool
 }
 
-// Encoded - [crc32 - 4b][keyLen - 4b][valLen - 4b][deleted - 1b][key - keyLen][val - valLen]
-
-// Encode encodes entry into byte form above
+// Encode serializes the entry as checksum, lengths, flags, key, and value.
 func (ent *Entry) Encode() []byte {
 	data := make([]byte, 4+4+4+1+len(ent.key)+len(ent.val))
 	binary.LittleEndian.PutUint32(data[4:8], uint32(len(ent.key)))
@@ -36,7 +34,7 @@ func (ent *Entry) Encode() []byte {
 
 var ErrBadSum = errors.New("bad checksum")
 
-// Decode reads in byte in encoded form to fill in the Entry with its values
+// Decode fills the entry from its encoded binary form.
 func (ent *Entry) Decode(r io.Reader) error {
 	var header [4 + 4 + 4 + 1]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {
