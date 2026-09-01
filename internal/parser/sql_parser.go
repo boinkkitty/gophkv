@@ -13,10 +13,12 @@ type Parser struct {
 	pos int
 }
 
+// NewParser returns a parser initialized with the input string.
 func NewParser(s string) Parser {
 	return Parser{buf: s, pos: 0}
 }
 
+// isSpace reports whether ch is an ASCII whitespace character.
 func isSpace(ch byte) bool {
 	switch ch {
 	case '\t', '\n', '\v', '\f', '\r', ' ':
@@ -24,28 +26,40 @@ func isSpace(ch byte) bool {
 	}
 	return false
 }
+
+// isAlpha reports whether ch is an ASCII letter.
 func isAlpha(ch byte) bool {
 	return 'a' <= (ch|32) && (ch|32) <= 'z'
 }
+
+// isDigit reports whether ch is an ASCII digit.
 func isDigit(ch byte) bool {
 	return '0' <= ch && ch <= '9'
 }
+
+// isNameStart reports whether ch can begin an identifier.
 func isNameStart(ch byte) bool {
 	return isAlpha(ch) || ch == '_'
 }
+
+// isNameContinue reports whether ch can continue an identifier.
 func isNameContinue(ch byte) bool {
 	return isAlpha(ch) || isDigit(ch) || ch == '_'
 }
+
+// isSeparator reports whether ch terminates an identifier.
 func isSeparator(ch byte) bool {
 	return ch < 128 && !isNameContinue(ch)
 }
 
+// skipSpaces advances past any leading whitespace.
 func (p *Parser) skipSpaces() {
 	for p.pos < len(p.buf) && isSpace(p.buf[p.pos]) {
 		p.pos += 1
 	}
 }
 
+// tryKeyword consumes kw if it appears at the current position.
 func (p *Parser) tryKeyword(kw string) bool {
 	p.skipSpaces()
 	if !(p.pos+len(kw) <= len(p.buf) && strings.EqualFold(p.buf[p.pos:p.pos+len(kw)], kw)) {
@@ -58,6 +72,7 @@ func (p *Parser) tryKeyword(kw string) bool {
 	return true
 }
 
+// tryName parses an identifier from the current position.
 func (p *Parser) tryName() (string, bool) {
 	p.skipSpaces()
 	start, cur := p.pos, p.pos
@@ -72,6 +87,7 @@ func (p *Parser) tryName() (string, bool) {
 	return p.buf[start:cur], true
 }
 
+// parseValue parses either a string or integer cell value.
 func (p *Parser) parseValue(out *table.Cell) error {
 	p.skipSpaces()
 	if p.pos >= len(p.buf) {
@@ -87,6 +103,7 @@ func (p *Parser) parseValue(out *table.Cell) error {
 	}
 }
 
+// parseString parses a quoted string cell value.
 func (p *Parser) parseString(out *table.Cell) error {
 	quote := p.buf[p.pos]
 	cur := p.pos + 1
@@ -112,6 +129,7 @@ func (p *Parser) parseString(out *table.Cell) error {
 	return errors.New("string is not terminated")
 }
 
+// parseInt parses a signed integer cell value.
 func (p *Parser) parseInt(out *table.Cell) (err error) {
 	start, cur := p.pos, p.pos
 	if p.buf[cur] == '-' || p.buf[cur] == '+' {
@@ -129,6 +147,7 @@ func (p *Parser) parseInt(out *table.Cell) (err error) {
 	return nil
 }
 
+// isEnd reports whether the parser has reached the end of input.
 func (p *Parser) isEnd() bool {
 	p.skipSpaces()
 	return p.pos >= len(p.buf)

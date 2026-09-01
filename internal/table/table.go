@@ -6,10 +6,13 @@ type DB struct {
 	KV keyval.KV
 }
 
-func (db *DB) Open() error  { return db.KV.Open() }
+// Open opens the backing key-value store.
+func (db *DB) Open() error { return db.KV.Open() }
+
+// Close closes the backing key-value store.
 func (db *DB) Close() error { return db.KV.Close() }
 
-// Selects from KV
+// Select loads a row by its primary key.
 func (db *DB) Select(schema *Schema, row Row) (bool, error) {
 	key := row.EncodeKey(schema)
 	val, ok, err := db.KV.Get(key)
@@ -22,28 +25,28 @@ func (db *DB) Select(schema *Schema, row Row) (bool, error) {
 	return true, nil
 }
 
-// Inserts into KV
+// Insert stores a new row when the key does not already exist.
 func (db *DB) Insert(schema *Schema, row Row) (updated bool, err error) {
 	key := row.EncodeKey(schema)
 	val := row.EncodeVal(schema)
 	return db.KV.SetEx(key, val, keyval.ModeInsert)
 }
 
-// Upserts into KV
+// Upsert stores a row whether or not the key already exists.
 func (db *DB) Upsert(schema *Schema, row Row) (updated bool, err error) {
 	key := row.EncodeKey(schema)
 	val := row.EncodeVal(schema)
 	return db.KV.SetEx(key, val, keyval.ModeUpsert)
 }
 
-// Updates into KV
+// Update stores a row only when the key already exists.
 func (db *DB) Update(schema *Schema, row Row) (updated bool, err error) {
 	key := row.EncodeKey(schema)
 	val := row.EncodeVal(schema)
 	return db.KV.SetEx(key, val, keyval.ModeUpdate)
 }
 
-// Deletes from KV
+// Delete removes a row by its primary key.
 func (db *DB) Delete(schema *Schema, row Row) (deleted bool, err error) {
 	key := row.EncodeKey(schema)
 	return db.KV.Del(key)

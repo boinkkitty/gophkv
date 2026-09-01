@@ -50,6 +50,7 @@ const (
 	ModeUpdate UpdateMode = 2 // update existing
 )
 
+// SetEx stores val for key using the requested update mode.
 func (kv *KV) SetEx(key []byte, val []byte, mode UpdateMode) (bool, error) {
 	prev, exist := kv.mem[string(key)]
 
