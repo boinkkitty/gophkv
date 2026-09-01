@@ -2,14 +2,52 @@ package keyval
 
 import (
 	"bytes"
+
+	"github.com/boinkkitty/gophkv/log"
 )
 
 type KV struct {
 	mem map[string][]byte
+	log log.Log
 }
 
 func (kv *KV) Open() error {
+	if err := kv.log.Open(); err != nil {
+		return err
+	}
 	kv.mem = map[string][]byte{} // empty
+	for {
+		entry := Entry{}
+		eof, err := kv.log.Read(&entry)
+		if err != nil {
+			return err
+		} else if eof != nil {
+			break
+		}
+
+		if entry.deleted {
+			delete(kv.mem, string(entry.key))
+		} else {
+			kv.mem[string(entry.key)] = entry.val
+		}
+		kv.Set(entry.key, entry.val)
+	}
+
+	for {
+		ent := Entry{}
+		eof, err := kv.log.Read(&ent)
+		if err != nil {
+			return err
+		} else if eof {
+			break
+		}
+
+		if ent.deleted {
+			delete(kv.mem, string(ent.key))
+		} else {
+			kv.mem[string(ent.key)] = ent.val
+		}
+	}
 	return nil
 }
 
