@@ -273,12 +273,44 @@ func makePKey(schema *Schema, pkey []NamedCell) (Row, error) {
 	return row, nil
 }
 
-// subsetRow returns a row containing only the requested column indexes.
-func subsetRow(row Row, indices []int) (out Row) {
-	for _, idx := range indices {
-		out = append(out, row[idx])
+// matchAllEq flattens a boolean AND tree of equality comparisons into named cells.
+func matchAllEq(cond interface{}, out []NamedCell) ([]NamedCell, bool) {
+	binop, ok := cond.(*ExprBinOp)
+	if ok && binop.op == OP_AND {
+		var ok bool
+		if out, ok = matchAllEq(binop.left, out); !ok {
+			return nil, false
+		}
+		if out, ok = matchAllEq(binop.right, out); !ok {
+			return nil, false
+		}
+		return out, true
 	}
-	return
+	if ok && binop.op == OP_EQ {
+		left, right := binop.left, binop.right
+		name, ok := left.(string)
+		if !ok {
+			left, right = right, left
+			name, ok = left.(string)
+		}
+		if !ok {
+			return nil, false
+		}
+		cell, ok := right.(*Cell)
+		if !ok {
+			return nil, false
+		}
+		return append(out, NamedCell{Column: name, Value: *cell}), true
+	}
+	return nil, false
+}
+
+// matchPKey extracts a full primary key row from a supported WHERE condition tree.
+func matchPKey(schema *Schema, cond interface{}) (Row, error) {
+	if keys, ok := matchAllEq(cond, nil); ok {
+		return makePKey(schema, keys)
+	}
+	return nil, errors.New("unimplemented WHERE")
 }
 
 // execSelect executes a parsed SELECT statement.
@@ -288,7 +320,7 @@ func (db *DB) execSelect(stmt *StmtSelect) ([]Row, error) {
 		return nil, err
 	}
 
-	row, err := makePKey(&schema, stmt.Keys)
+	row, err := matchPKey(&schema, stmt.Cond)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +385,7 @@ func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error) {
 		return 0, err
 	}
 
-	row, err := makePKey(&schema, stmt.Keys)
+	row, err := matchPKey(&schema, stmt.Cond)
 	if err != nil {
 		return 0, err
 	}
@@ -390,7 +422,7 @@ func (db *DB) execDelete(stmt *StmtDelete) (count int, err error) {
 		return 0, err
 	}
 
-	row, err := makePKey(&schema, stmt.Keys)
+	row, err := matchPKey(&schema, stmt.Cond)
 	if err != nil {
 		return 0, err
 	}

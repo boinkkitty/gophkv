@@ -19,7 +19,7 @@ func NewParser(s string) Parser {
 type StmtSelect struct {
 	Table string
 	Cols  []interface{} // ExprUnOp | ExprBinOp | string | *Cell
-	Keys  []NamedCell
+	Cond  interface{}
 }
 
 type NamedCell struct {
@@ -46,13 +46,13 @@ type StmtInsert struct {
 
 type StmtUpdate struct {
 	Table string
-	Keys  []NamedCell
+	Cond  interface{}
 	Value []ExprAssign
 }
 
 type StmtDelete struct {
 	Table string
-	Keys  []NamedCell
+	Cond  interface{}
 }
 
 type ExprOp uint8
@@ -273,28 +273,27 @@ func (p *Parser) parseSelect(out *StmtSelect) error {
 	if out.Table, ok = p.tryName(); !ok {
 		return errors.New("expect table name")
 	}
-	return p.parseWhere(&out.Keys)
+	cond, err := p.parseWhere()
+	if err != nil {
+		return err
+	}
+	out.Cond = cond
+	return nil
 }
 
-// parseWhere parses a WHERE clause joined by AND.
-func (p *Parser) parseWhere(out *[]NamedCell) error {
+// parseWhere parses a WHERE clause as a general expression terminated by a semicolon.
+func (p *Parser) parseWhere() (interface{}, error) {
 	if !p.tryKeyword("WHERE") {
-		return errors.New("expect keyword")
+		return nil, errors.New("expect keyword")
 	}
-	for !p.tryPunctuation(";") {
-		expr := NamedCell{}
-		if len(*out) > 0 && !p.tryKeyword("AND") {
-			return errors.New("expect AND")
-		}
-		if err := p.parseEqual(&expr); err != nil {
-			return err
-		}
-		*out = append(*out, expr)
+	expr, err := p.parseExpr()
+	if err != nil {
+		return nil, err
 	}
-	if len(*out) == 0 {
-		return errors.New("expect where clause")
+	if !p.tryPunctuation(";") {
+		return nil, errors.New("expect ;")
 	}
-	return nil
+	return expr, nil
 }
 
 // parseCommaList parses a parenthesized comma-separated list.
@@ -418,7 +417,12 @@ func (p *Parser) parseUpdate(out *StmtUpdate) error {
 		return errors.New("expect assignment list")
 	}
 	p.pos -= len("WHERE")
-	return p.parseWhere(&out.Keys)
+	cond, err := p.parseWhere()
+	if err != nil {
+		return err
+	}
+	out.Cond = cond
+	return nil
 }
 
 // parseDelete parses a DELETE statement into out.
@@ -427,7 +431,12 @@ func (p *Parser) parseDelete(out *StmtDelete) error {
 	if out.Table, ok = p.tryName(); !ok {
 		return errors.New("expect table name")
 	}
-	return p.parseWhere(&out.Keys)
+	cond, err := p.parseWhere()
+	if err != nil {
+		return err
+	}
+	out.Cond = cond
+	return nil
 }
 
 // parseStmt parses one SQL statement and returns its typed representation.
