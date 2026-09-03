@@ -52,10 +52,12 @@ type StmtDelete struct {
 type ExprOp uint8
 
 const (
-	OP_LE ExprOp = 12 // <=
-	OP_GE ExprOp = 13 // >=
-	OP_LT ExprOp = 14 // <
-	OP_GT ExprOp = 15 // >
+	OP_ADD ExprOp = 1  // +
+	OP_SUB ExprOp = 2  // -
+	OP_LE  ExprOp = 12 // <=
+	OP_GE  ExprOp = 13 // >=
+	OP_LT  ExprOp = 14 // <
+	OP_GT  ExprOp = 15 // >
 )
 
 // isSpace reports whether ch is an ASCII whitespace character.
@@ -434,4 +436,52 @@ func (p *Parser) ParseStmt() (interface{}, error) {
 func (p *Parser) isEnd() bool {
 	p.skipSpaces()
 	return p.pos >= len(p.buf)
+}
+
+type ExprBinOp struct {
+	op    ExprOp
+	left  interface{}
+	right interface{}
+}
+
+// parseAtom parses a single expression atom as either an identifier or literal cell.
+func (p *Parser) parseAtom() (interface{}, error) {
+	if name, ok := p.tryName(); ok {
+		return name, nil
+	}
+	cell := &Cell{}
+	if err := p.parseValue(cell); err != nil {
+		return nil, err
+	}
+	return cell, nil
+}
+
+// parseAdd parses a left-associative chain of + and - operations over atoms.
+func (p *Parser) parseAdd() (interface{}, error) {
+	left, err := p.parseAtom()
+	if err != nil {
+		return nil, err
+	}
+
+	tokens := []string{"+", "-"}
+	ops := []ExprOp{OP_ADD, OP_SUB}
+
+	for ok := true; ok; {
+		ok = false
+		for i := range tokens {
+			if !p.tryPunctuation(tokens[i]) {
+				continue
+			}
+
+			ok = true
+			right, err := p.parseAtom()
+			if err != nil {
+				return nil, err
+			}
+			left = &ExprBinOp{op: ops[i], left: left, right: right}
+			break
+		}
+	}
+
+	return left, nil
 }

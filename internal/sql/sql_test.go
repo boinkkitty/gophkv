@@ -1,8 +1,10 @@
 package sql
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseName(t *testing.T) {
@@ -104,4 +106,35 @@ func TestParseStmt(t *testing.T) {
 		Keys:  []NamedCell{{"c", Cell{Type: TypeI64, I64: 3}}, {"d", Cell{Type: TypeI64, I64: 4}}},
 	}
 	testParseStmt(t, s, stmt)
+}
+
+func testParseExpr(t *testing.T, s string, expr interface{}) {
+	p := NewParser(s)
+	out, err := p.parseAdd()
+	require.Nil(t, err)
+	assert.Equal(t, expr, out)
+	assert.True(t, p.isEnd())
+}
+
+func TestParseExpr(t *testing.T) {
+	var expr interface{}
+
+	testParseExpr(t, "a", "a")
+	testParseExpr(t, "1", &Cell{Type: TypeI64, I64: 1})
+
+	s := "a + 1"
+	expr = &ExprBinOp{op: OP_ADD, left: "a", right: &Cell{Type: TypeI64, I64: 1}}
+	testParseExpr(t, s, expr)
+
+	s = "a + 1 - b"
+	expr = &ExprBinOp{
+		op: OP_SUB,
+		left: &ExprBinOp{
+			op:    OP_ADD,
+			left:  "a",
+			right: &Cell{Type: TypeI64, I64: 1},
+		},
+		right: "b",
+	}
+	testParseExpr(t, s, expr)
 }
