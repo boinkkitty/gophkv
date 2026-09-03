@@ -1,4 +1,4 @@
-package table
+package sql
 
 import (
 	"encoding/binary"

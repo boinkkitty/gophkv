@@ -1,4 +1,4 @@
-package table
+package sql
 
 import (
 	"testing"
@@ -15,7 +15,7 @@ func TestRowEncode(t *testing.T) {
 			{Name: "src", Type: TypeStr},
 			{Name: "dst", Type: TypeStr},
 		},
-		PKey: []int{1, 2}, // (src, dst)
+		PKey: []int{1, 2},
 	}
 
 	row := Row{

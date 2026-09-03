@@ -1,11 +1,9 @@
-package parser
+package sql
 
 import (
 	"errors"
 	"strconv"
 	"strings"
-
-	"github.com/boinkkitty/gophkv/internal/table"
 )
 
 type Parser struct {
@@ -19,36 +17,36 @@ func NewParser(s string) Parser {
 }
 
 type StmtSelect struct {
-	table string
-	cols  []string
-	keys  []NamedCell
-}
-
-type StmtCreatTable struct {
-	table string
-	cols  []table.Column
-	pkey  []string
-}
-
-type StmtInsert struct {
-	table string
-	value []table.Cell
-}
-
-type StmtUpdate struct {
-	table string
-	keys  []NamedCell
-	value []NamedCell
-}
-
-type StmtDelete struct {
-	table string
-	keys  []NamedCell
+	Table string
+	Cols  []string
+	Keys  []NamedCell
 }
 
 type NamedCell struct {
-	column string
-	value  table.Cell
+	Column string
+	Value  Cell
+}
+
+type StmtCreatTable struct {
+	Table string
+	Cols  []Column
+	PKey  []string
+}
+
+type StmtInsert struct {
+	Table string
+	Value []Cell
+}
+
+type StmtUpdate struct {
+	Table string
+	Keys  []NamedCell
+	Value []NamedCell
+}
+
+type StmtDelete struct {
+	Table string
+	Keys  []NamedCell
 }
 
 // isSpace reports whether ch is an ASCII whitespace character.
@@ -139,7 +137,7 @@ func (p *Parser) tryName() (string, bool) {
 }
 
 // parseValue parses either a string or integer cell value.
-func (p *Parser) parseValue(out *table.Cell) error {
+func (p *Parser) parseValue(out *Cell) error {
 	p.skipSpaces()
 	if p.pos >= len(p.buf) {
 		return errors.New("expect value")
@@ -155,7 +153,7 @@ func (p *Parser) parseValue(out *table.Cell) error {
 }
 
 // parseString parses a quoted string cell value.
-func (p *Parser) parseString(out *table.Cell) error {
+func (p *Parser) parseString(out *Cell) error {
 	quote := p.buf[p.pos]
 	cur := p.pos + 1
 	for cur < len(p.buf) {
@@ -169,7 +167,7 @@ func (p *Parser) parseString(out *table.Cell) error {
 				return errors.New("bad escape")
 			}
 		} else if ch == quote {
-			out.Type = table.TypeStr
+			out.Type = TypeStr
 			p.pos = cur + 1
 			return nil
 		} else {
@@ -181,7 +179,7 @@ func (p *Parser) parseString(out *table.Cell) error {
 }
 
 // parseInt parses a signed integer cell value.
-func (p *Parser) parseInt(out *table.Cell) (err error) {
+func (p *Parser) parseInt(out *Cell) (err error) {
 	start, cur := p.pos, p.pos
 	if p.buf[cur] == '-' || p.buf[cur] == '+' {
 		cur++
@@ -193,7 +191,7 @@ func (p *Parser) parseInt(out *table.Cell) (err error) {
 	if out.I64, err = strconv.ParseInt(p.buf[start:cur], 10, 64); err != nil {
 		return err
 	}
-	out.Type = table.TypeI64
+	out.Type = TypeI64
 	p.pos = cur
 	return nil
 }
@@ -201,36 +199,36 @@ func (p *Parser) parseInt(out *table.Cell) (err error) {
 // parseEqual parses a column equality expression.
 func (p *Parser) parseEqual(out *NamedCell) error {
 	var ok bool
-	out.column, ok = p.tryName()
+	out.Column, ok = p.tryName()
 	if !ok {
 		return errors.New("expect column")
 	}
 	if !p.tryPunctuation("=") {
 		return errors.New("expect =")
 	}
-	return p.parseValue(&out.value)
+	return p.parseValue(&out.Value)
 }
 
 // parseSelect parses a SELECT statement into out.
 func (p *Parser) parseSelect(out *StmtSelect) error {
 	for !p.tryKeyword("FROM") {
-		if len(out.cols) > 0 && !p.tryPunctuation(",") {
+		if len(out.Cols) > 0 && !p.tryPunctuation(",") {
 			return errors.New("expect comma")
 		}
 		if name, ok := p.tryName(); ok {
-			out.cols = append(out.cols, name)
+			out.Cols = append(out.Cols, name)
 		} else {
 			return errors.New("expect column")
 		}
 	}
-	if len(out.cols) == 0 {
+	if len(out.Cols) == 0 {
 		return errors.New("expect column list")
 	}
 	var ok bool
-	if out.table, ok = p.tryName(); !ok {
+	if out.Table, ok = p.tryName(); !ok {
 		return errors.New("expect table name")
 	}
-	return p.parseWhere(&out.keys)
+	return p.parseWhere(&out.Keys)
 }
 
 // parseWhere parses a WHERE clause joined by AND.
@@ -285,11 +283,11 @@ func (p *Parser) parseNameItem(out *[]string) error {
 // parseCreateTableItem parses either a column definition or primary key clause.
 func (p *Parser) parseCreateTableItem(out *StmtCreatTable) error {
 	if p.tryKeyword("PRIMARY", "KEY") {
-		return p.parseCommaList(func() error { return p.parseNameItem(&out.pkey) })
+		return p.parseCommaList(func() error { return p.parseNameItem(&out.PKey) })
 	}
 
 	var ok bool
-	col := table.Column{}
+	col := Column{}
 	if col.Name, ok = p.tryName(); !ok {
 		return errors.New("expect name")
 	}
@@ -299,20 +297,20 @@ func (p *Parser) parseCreateTableItem(out *StmtCreatTable) error {
 	}
 	switch kind {
 	case "int64":
-		col.Type = table.TypeI64
+		col.Type = TypeI64
 	case "string":
-		col.Type = table.TypeStr
+		col.Type = TypeStr
 	default:
 		return errors.New("unknown column type")
 	}
-	out.cols = append(out.cols, col)
+	out.Cols = append(out.Cols, col)
 	return nil
 }
 
 // parseCreateTable parses a CREATE TABLE statement into out.
 func (p *Parser) parseCreateTable(out *StmtCreatTable) error {
 	var ok bool
-	if out.table, ok = p.tryName(); !ok {
+	if out.Table, ok = p.tryName(); !ok {
 		return errors.New("expect table name")
 	}
 	if err := p.parseCommaList(func() error { return p.parseCreateTableItem(out) }); err != nil {
@@ -325,8 +323,8 @@ func (p *Parser) parseCreateTable(out *StmtCreatTable) error {
 }
 
 // parseValueItem parses one cell value into out.
-func (p *Parser) parseValueItem(out *[]table.Cell) error {
-	cell := table.Cell{}
+func (p *Parser) parseValueItem(out *[]Cell) error {
+	cell := Cell{}
 	if err := p.parseValue(&cell); err != nil {
 		return err
 	}
@@ -337,13 +335,13 @@ func (p *Parser) parseValueItem(out *[]table.Cell) error {
 // parseInsert parses an INSERT statement into out.
 func (p *Parser) parseInsert(out *StmtInsert) error {
 	var ok bool
-	if out.table, ok = p.tryName(); !ok {
+	if out.Table, ok = p.tryName(); !ok {
 		return errors.New("expect table name")
 	}
 	if !p.tryKeyword("VALUES") {
 		return errors.New("expect VALUES")
 	}
-	if err := p.parseCommaList(func() error { return p.parseValueItem(&out.value) }); err != nil {
+	if err := p.parseCommaList(func() error { return p.parseValueItem(&out.Value) }); err != nil {
 		return err
 	}
 	if !p.tryPunctuation(";") {
@@ -355,7 +353,7 @@ func (p *Parser) parseInsert(out *StmtInsert) error {
 // parseUpdate parses an UPDATE statement into out.
 func (p *Parser) parseUpdate(out *StmtUpdate) error {
 	var ok bool
-	if out.table, ok = p.tryName(); !ok {
+	if out.Table, ok = p.tryName(); !ok {
 		return errors.New("expect table name")
 	}
 	if !p.tryKeyword("SET") {
@@ -363,28 +361,28 @@ func (p *Parser) parseUpdate(out *StmtUpdate) error {
 	}
 	for !p.tryKeyword("WHERE") {
 		expr := NamedCell{}
-		if len(out.value) > 0 && !p.tryKeyword(",") {
+		if len(out.Value) > 0 && !p.tryKeyword(",") {
 			return errors.New("expect ,")
 		}
 		if err := p.parseEqual(&expr); err != nil {
 			return err
 		}
-		out.value = append(out.value, expr)
+		out.Value = append(out.Value, expr)
 	}
-	if len(out.value) == 0 {
+	if len(out.Value) == 0 {
 		return errors.New("expect assignment list")
 	}
 	p.pos -= len("WHERE")
-	return p.parseWhere(&out.keys)
+	return p.parseWhere(&out.Keys)
 }
 
 // parseDelete parses a DELETE statement into out.
 func (p *Parser) parseDelete(out *StmtDelete) error {
 	var ok bool
-	if out.table, ok = p.tryName(); !ok {
+	if out.Table, ok = p.tryName(); !ok {
 		return errors.New("expect table name")
 	}
-	return p.parseWhere(&out.keys)
+	return p.parseWhere(&out.Keys)
 }
 
 // parseStmt parses one SQL statement and returns its typed representation.
@@ -416,6 +414,11 @@ func (p *Parser) parseStmt() (out interface{}, err error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// ParseStmt parses one SQL statement and returns its typed representation.
+func (p *Parser) ParseStmt() (interface{}, error) {
+	return p.parseStmt()
 }
 
 // isEnd reports whether the parser has reached the end of input.

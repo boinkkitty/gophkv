@@ -1,10 +1,8 @@
-package parser
+package sql
 
 import (
-	"testing"
-
-	"github.com/boinkkitty/gophkv/internal/table"
 	"github.com/stretchr/testify/assert"
+	"testing"
 )
 
 func TestParseName(t *testing.T) {
@@ -30,9 +28,9 @@ func TestParseKeyword(t *testing.T) {
 	assert.True(t, p.tryKeyword("select", "hello") && p.isEnd())
 }
 
-func testParseValue(t *testing.T, s string, ref table.Cell) {
+func testParseValue(t *testing.T, s string, ref Cell) {
 	p := NewParser(s)
-	out := table.Cell{}
+	out := Cell{}
 	err := p.parseValue(&out)
 	assert.Nil(t, err)
 	assert.True(t, p.isEnd())
@@ -40,9 +38,9 @@ func testParseValue(t *testing.T, s string, ref table.Cell) {
 }
 
 func TestParseValue(t *testing.T) {
-	testParseValue(t, " -123 ", table.Cell{Type: table.TypeI64, I64: -123})
-	testParseValue(t, ` 'abc\'\"d' `, table.Cell{Type: table.TypeStr, Str: []byte("abc'\"d")})
-	testParseValue(t, ` "abc\'\"d" `, table.Cell{Type: table.TypeStr, Str: []byte("abc'\"d")})
+	testParseValue(t, " -123 ", Cell{Type: TypeI64, I64: -123})
+	testParseValue(t, ` 'abc\'\"d' `, Cell{Type: TypeStr, Str: []byte("abc'\"d")})
+	testParseValue(t, ` "abc\'\"d" `, Cell{Type: TypeStr, Str: []byte("abc'\"d")})
 }
 
 func testParseStmt(t *testing.T, s string, ref interface{}) {
@@ -57,19 +55,19 @@ func TestParseStmt(t *testing.T) {
 	var stmt interface{}
 	s := "select a from t where c=1;"
 	stmt = &StmtSelect{
-		table: "t",
-		cols:  []string{"a"},
-		keys:  []NamedCell{{column: "c", value: table.Cell{Type: table.TypeI64, I64: 1}}},
+		Table: "t",
+		Cols:  []string{"a"},
+		Keys:  []NamedCell{{Column: "c", Value: Cell{Type: TypeI64, I64: 1}}},
 	}
 	testParseStmt(t, s, stmt)
 
 	s = "select a,b_02 from T where c=1 and d='e';"
 	stmt = &StmtSelect{
-		table: "T",
-		cols:  []string{"a", "b_02"},
-		keys: []NamedCell{
-			{column: "c", value: table.Cell{Type: table.TypeI64, I64: 1}},
-			{column: "d", value: table.Cell{Type: table.TypeStr, Str: []byte("e")}},
+		Table: "T",
+		Cols:  []string{"a", "b_02"},
+		Keys: []NamedCell{
+			{Column: "c", Value: Cell{Type: TypeI64, I64: 1}},
+			{Column: "d", Value: Cell{Type: TypeStr, Str: []byte("e")}},
 		},
 	}
 	testParseStmt(t, s, stmt)
@@ -79,31 +77,31 @@ func TestParseStmt(t *testing.T) {
 
 	s = "create table t (a string, b int64, primary key (b));"
 	stmt = &StmtCreatTable{
-		table: "t",
-		cols:  []table.Column{{Name: "a", Type: table.TypeStr}, {Name: "b", Type: table.TypeI64}},
-		pkey:  []string{"b"},
+		Table: "t",
+		Cols:  []Column{{Name: "a", Type: TypeStr}, {Name: "b", Type: TypeI64}},
+		PKey:  []string{"b"},
 	}
 	testParseStmt(t, s, stmt)
 
 	s = "insert into t values (1, 'hi');"
 	stmt = &StmtInsert{
-		table: "t",
-		value: []table.Cell{{Type: table.TypeI64, I64: 1}, {Type: table.TypeStr, Str: []byte("hi")}},
+		Table: "t",
+		Value: []Cell{{Type: TypeI64, I64: 1}, {Type: TypeStr, Str: []byte("hi")}},
 	}
 	testParseStmt(t, s, stmt)
 
 	s = "update t set a = 1, b = 2 where c = 3 and d = 4;"
 	stmt = &StmtUpdate{
-		table: "t",
-		value: []NamedCell{{"a", table.Cell{Type: table.TypeI64, I64: 1}}, {"b", table.Cell{Type: table.TypeI64, I64: 2}}},
-		keys:  []NamedCell{{"c", table.Cell{Type: table.TypeI64, I64: 3}}, {"d", table.Cell{Type: table.TypeI64, I64: 4}}},
+		Table: "t",
+		Value: []NamedCell{{"a", Cell{Type: TypeI64, I64: 1}}, {"b", Cell{Type: TypeI64, I64: 2}}},
+		Keys:  []NamedCell{{"c", Cell{Type: TypeI64, I64: 3}}, {"d", Cell{Type: TypeI64, I64: 4}}},
 	}
 	testParseStmt(t, s, stmt)
 
 	s = "delete from t where c = 3 and d = 4;"
 	stmt = &StmtDelete{
-		table: "t",
-		keys:  []NamedCell{{"c", table.Cell{Type: table.TypeI64, I64: 3}}, {"d", table.Cell{Type: table.TypeI64, I64: 4}}},
+		Table: "t",
+		Keys:  []NamedCell{{"c", Cell{Type: TypeI64, I64: 3}}, {"d", Cell{Type: TypeI64, I64: 4}}},
 	}
 	testParseStmt(t, s, stmt)
 }

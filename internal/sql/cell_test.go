@@ -1,4 +1,4 @@
-package table
+package sql
 
 import (
 	"testing"
@@ -9,11 +9,12 @@ import (
 // TestTableCell verifies cell encoding and decoding for supported types.
 func TestTableCell(t *testing.T) {
 	cell := Cell{Type: TypeI64, I64: -2}
-	data := []byte{0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	data := []byte{254, 255, 255, 255, 255, 255, 255, 255}
 	assert.Equal(t, data, cell.Encode(nil))
 	decoded := Cell{Type: TypeI64}
 	rest, err := decoded.Decode(data)
-	assert.True(t, len(rest) == 0 && err == nil)
+	assert.Nil(t, err)
+	assert.Len(t, rest, 0)
 	assert.Equal(t, cell, decoded)
 
 	cell = Cell{Type: TypeStr, Str: []byte("asdf")}
@@ -21,6 +22,7 @@ func TestTableCell(t *testing.T) {
 	assert.Equal(t, data, cell.Encode(nil))
 	decoded = Cell{Type: TypeStr}
 	rest, err = decoded.Decode(data)
-	assert.True(t, len(rest) == 0 && err == nil)
+	assert.Nil(t, err)
+	assert.Len(t, rest, 0)
 	assert.Equal(t, cell, decoded)
 }
