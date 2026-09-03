@@ -2,11 +2,15 @@ package keyval
 
 import (
 	"bytes"
+	"slices"
+
+	"github.com/boinkkitty/gophkv/internal/utils"
 )
 
 type KV struct {
-	mem map[string][]byte
-	Log Log
+	Log  Log
+	keys [][]byte
+	vals [][]byte
 }
 
 // Open opens the log and rebuilds the in-memory index from it.
@@ -14,22 +18,36 @@ func (kv *KV) Open() error {
 	if err := kv.Log.Open(); err != nil {
 		return err
 	}
-	kv.mem = map[string][]byte{} // empty
+
+	entries := []Entry{}
 	for {
-		entry := Entry{}
-		eof, err := kv.Log.Read(&entry)
+		ent := Entry{}
+		eof, err := kv.Log.Read(&ent)
 		if err != nil {
 			return err
 		} else if eof {
 			break
 		}
+		entries = append(entries, ent)
+	}
 
-		if entry.deleted {
-			delete(kv.mem, string(entry.key))
-		} else {
-			kv.mem[string(entry.key)] = entry.val
+	// sort keys
+	slices.SortStableFunc(entries, func(a, b Entry) int {
+		return bytes.Compare(a.key, b.key)
+	})
+	kv.keys, kv.vals = kv.keys[:0], kv.vals[:0]
+
+	for _, ent := range entries {
+		n := len(kv.keys)
+		if n > 0 && bytes.Equal(kv.keys[n-1], ent.key) {
+			kv.keys, kv.vals = kv.keys[:n-1], kv.vals[:n-1]
+		}
+		if !ent.deleted {
+			kv.keys = append(kv.keys, ent.key)
+			kv.vals = append(kv.vals, ent.val)
 		}
 	}
+
 	return nil
 }
 
@@ -38,8 +56,10 @@ func (kv *KV) Close() error { return kv.Log.Close() }
 
 // Get returns the value stored for key, if present.
 func (kv *KV) Get(key []byte) ([]byte, bool, error) {
-	val, ok := kv.mem[string(key)]
-	return val, ok, nil
+	if idx, ok := slices.BinarySearchFunc(kv.keys, key, bytes.Compare); ok {
+		return kv.vals[idx], true, nil
+	}
+	return nil, false, nil
 }
 
 type UpdateMode int
@@ -52,18 +72,18 @@ const (
 
 // SetEx stores val for key using the requested update mode.
 func (kv *KV) SetEx(key []byte, val []byte, mode UpdateMode) (bool, error) {
-	prev, exist := kv.mem[string(key)]
+	idx, exist := slices.BinarySearchFunc(kv.keys, key, bytes.Compare)
 
 	var updated bool
 	var err error
 
 	switch mode {
 	case ModeUpsert:
-		updated = !exist || !bytes.Equal(prev, val)
+		updated = !exist || !bytes.Equal(kv.vals[idx], val)
 	case ModeInsert:
 		updated = !exist
 	case ModeUpdate:
-		updated = exist && !bytes.Equal(prev, val)
+		updated = exist && !bytes.Equal(kv.vals[idx], val)
 	default:
 		panic("unreachable")
 	}
@@ -71,7 +91,12 @@ func (kv *KV) SetEx(key []byte, val []byte, mode UpdateMode) (bool, error) {
 		if err = kv.Log.Write(&Entry{key: key, val: val}); err != nil {
 			return false, err
 		}
-		kv.mem[string(key)] = val
+		if exist {
+			kv.vals[idx] = val
+		} else {
+			kv.keys = slices.Insert(kv.keys, idx, key)
+			kv.vals = slices.Insert(kv.vals, idx, val)
+		}
 	}
 	return updated, err
 }
@@ -83,15 +108,55 @@ func (kv *KV) Set(key []byte, val []byte) (bool, error) {
 
 // Del removes key and reports whether anything was deleted.
 func (kv *KV) Del(key []byte) (bool, error) {
-	_, deleted := kv.mem[string(key)]
-	if deleted {
-		if err := kv.Log.Write(&Entry{
-			key:     key,
-			deleted: true,
-		}); err != nil {
+	if idx, ok := slices.BinarySearchFunc(kv.keys, key, bytes.Compare); ok {
+		if err := kv.Log.Write(&Entry{key: key, deleted: true}); err != nil {
 			return false, err
 		}
-		delete(kv.mem, string(key))
+		kv.keys = slices.Delete(kv.keys, idx, idx+1)
+		return true, nil
 	}
-	return deleted, nil
+	return false, nil
+}
+
+type KVIterator struct {
+	keys [][]byte
+	vals [][]byte
+	pos  int
+}
+
+func (kv *KV) Seek(key []byte) (*KVIterator, error) {
+	pos, _ := slices.BinarySearchFunc(kv.keys, key, bytes.Compare)
+	return &KVIterator{
+		keys: kv.keys,
+		vals: kv.vals,
+		pos:  pos,
+	}, nil
+}
+
+func (iter *KVIterator) Valid() bool {
+	return 0 <= iter.pos && iter.pos < len(iter.keys)
+}
+
+func (iter *KVIterator) Key() []byte {
+	utils.Check(iter.Valid())
+	return iter.keys[iter.pos]
+}
+
+func (iter *KVIterator) Val() []byte {
+	utils.Check(iter.Valid())
+	return iter.vals[iter.pos]
+}
+
+func (iter *KVIterator) Next() error {
+	if iter.pos < len(iter.keys) {
+		iter.pos++
+	}
+	return nil
+}
+
+func (iter *KVIterator) Prev() error {
+	if iter.pos >= 0 {
+		iter.pos--
+	}
+	return nil
 }
