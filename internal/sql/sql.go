@@ -56,10 +56,16 @@ const (
 	OP_SUB ExprOp = 2  // -
 	OP_MUL ExprOp = 3  // *
 	OP_DIV ExprOp = 4  // /
+	OP_EQ  ExprOp = 10 // =
+	OP_NE  ExprOp = 11 // !=
 	OP_LE  ExprOp = 12 // <=
 	OP_GE  ExprOp = 13 // >=
 	OP_LT  ExprOp = 14 // <
 	OP_GT  ExprOp = 15 // >
+	OP_AND ExprOp = 20 // AND
+	OP_OR  ExprOp = 21 // OR
+	OP_NOT ExprOp = 30 // NOT
+	OP_NEG ExprOp = 31 // unary -
 )
 
 // isSpace reports whether ch is an ASCII whitespace character.
@@ -192,7 +198,7 @@ func (p *Parser) parseString(out *Cell) error {
 }
 
 // parseInt parses a signed integer cell value.
-func (p *Parser) parseInt(out *Cell) (err error) {
+func (p *Parser) parseInt(out *Cell) error {
 	start, cur := p.pos, p.pos
 	if p.buf[cur] == '-' || p.buf[cur] == '+' {
 		cur++
@@ -201,9 +207,11 @@ func (p *Parser) parseInt(out *Cell) (err error) {
 		cur++
 	}
 
-	if out.I64, err = strconv.ParseInt(p.buf[start:cur], 10, 64); err != nil {
+	value, err := strconv.ParseInt(p.buf[start:cur], 10, 64)
+	if err != nil {
 		return err
 	}
+	out.I64 = value
 	out.Type = TypeI64
 	p.pos = cur
 	return nil
@@ -399,7 +407,10 @@ func (p *Parser) parseDelete(out *StmtDelete) error {
 }
 
 // parseStmt parses one SQL statement and returns its typed representation.
-func (p *Parser) parseStmt() (out interface{}, err error) {
+func (p *Parser) parseStmt() (interface{}, error) {
+	var out interface{}
+	var err error
+
 	if p.tryKeyword("SELECT") {
 		stmt := &StmtSelect{}
 		err = p.parseSelect(stmt)
@@ -440,10 +451,17 @@ func (p *Parser) isEnd() bool {
 	return p.pos >= len(p.buf)
 }
 
+// ExprBinOp represents a binary expression node in the parsed AST.
 type ExprBinOp struct {
 	op    ExprOp
 	left  interface{}
 	right interface{}
+}
+
+// ExprUnOp represents a unary expression node in the parsed AST.
+type ExprUnOp struct {
+	op  ExprOp
+	kid interface{}
 }
 
 // parseAtom parses a single expression atom as either an identifier or literal cell.
@@ -469,67 +487,91 @@ func (p *Parser) parseAtom() (interface{}, error) {
 	return cell, nil
 }
 
-// parseExpression parses expression at highest level
+// parseBinop parses a left-associative operator chain over a nested parser.
+func (p *Parser) parseBinop(tokens []string, ops []ExprOp, inner func() (interface{}, error)) (interface{}, error) {
+	if len(tokens) != len(ops) {
+		panic("token/op mismatch")
+	}
+
+	left, err := inner()
+	if err != nil {
+		return nil, err
+	}
+
+	for ok := true; ok; {
+		ok = false
+		for i := range tokens {
+			if !p.tryPunctuation(tokens[i]) && !p.tryKeyword(tokens[i]) {
+				continue
+			}
+
+			ok = true
+			right, err := inner()
+			if err != nil {
+				return nil, err
+			}
+			left = &ExprBinOp{op: ops[i], left: left, right: right}
+			break
+		}
+	}
+
+	return left, nil
+}
+
+// parseExpr parses an expression from the lowest-precedence entry point.
 func (p *Parser) parseExpr() (interface{}, error) {
-	return p.parseAdd()
+	return p.parseOr()
 }
 
-// parseAdd parses a left-associative chain of + and - operations over muls.
+// parseOr parses left-associative OR expressions.
+func (p *Parser) parseOr() (interface{}, error) {
+	return p.parseBinop([]string{"OR"}, []ExprOp{OP_OR}, p.parseAnd)
+}
+
+// parseAnd parses left-associative AND expressions.
+func (p *Parser) parseAnd() (interface{}, error) {
+	return p.parseBinop([]string{"AND"}, []ExprOp{OP_AND}, p.parseNot)
+}
+
+// parseNot parses unary NOT expressions.
+func (p *Parser) parseNot() (interface{}, error) {
+	if p.tryKeyword("NOT") {
+		expr, err := p.parseNot()
+		if err != nil {
+			return nil, err
+		}
+		return &ExprUnOp{op: OP_NOT, kid: expr}, nil
+	}
+	return p.parseCmp()
+}
+
+// parseCmp parses comparison expressions over additive terms.
+func (p *Parser) parseCmp() (interface{}, error) {
+	return p.parseBinop(
+		[]string{"=", "!=", "<>", "<=", ">=", "<", ">"},
+		[]ExprOp{OP_EQ, OP_NE, OP_NE, OP_LE, OP_GE, OP_LT, OP_GT},
+		p.parseAdd,
+	)
+}
+
+// parseAdd parses a left-associative chain of + and - operations over multiplicative terms.
 func (p *Parser) parseAdd() (interface{}, error) {
-	left, err := p.parseMul()
-	if err != nil {
-		return nil, err
-	}
-
-	tokens := []string{"+", "-"}
-	ops := []ExprOp{OP_ADD, OP_SUB}
-
-	for ok := true; ok; {
-		ok = false
-		for i := range tokens {
-			if !p.tryPunctuation(tokens[i]) {
-				continue
-			}
-
-			ok = true
-			right, err := p.parseMul()
-			if err != nil {
-				return nil, err
-			}
-			left = &ExprBinOp{op: ops[i], left: left, right: right}
-			break
-		}
-	}
-
-	return left, nil
+	return p.parseBinop([]string{"+", "-"}, []ExprOp{OP_ADD, OP_SUB}, p.parseMul)
 }
 
-// parseMul parses a left-associative chain of * and / operations over atoms.
+// parseMul parses a left-associative chain of * and / operations over unary terms.
 func (p *Parser) parseMul() (interface{}, error) {
-	left, err := p.parseAtom()
-	if err != nil {
-		return nil, err
-	}
+	return p.parseBinop([]string{"*", "/"}, []ExprOp{OP_MUL, OP_DIV}, p.parseNeg)
+}
 
-	tokens := []string{"*", "/"}
-	ops := []ExprOp{OP_MUL, OP_DIV}
-
-	for ok := true; ok; {
-		ok = false
-		for i := range tokens {
-			if !p.tryPunctuation(tokens[i]) {
-				continue
-			}
-
-			ok = true
-			right, err := p.parseAtom()
-			if err != nil {
-				return nil, err
-			}
-			left = &ExprBinOp{op: ops[i], left: left, right: right}
-			break
+// parseNeg parses unary negation before atomic expressions.
+func (p *Parser) parseNeg() (interface{}, error) {
+	if p.tryPunctuation("-") {
+		expr, err := p.parseNeg()
+		if err != nil {
+			return nil, err
 		}
+		return &ExprUnOp{op: OP_NEG, kid: expr}, nil
 	}
-
-	return left, nil
+	return p.parseAtom()
 }
