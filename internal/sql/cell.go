@@ -21,6 +21,24 @@ type Cell struct {
 
 var ErrMoreData = errors.New("expect more data")
 
+// Cell binary formats:
+//
+// Value encoding:
+//   TypeI64: [8 bytes i64, little-endian]
+//   TypeStr: [4 bytes length, little-endian][N raw string bytes]
+//
+// Key encoding:
+//   TypeI64: [8 bytes i64, big-endian, sign bit flipped]
+//   TypeStr: [escaped string bytes][0x00 terminator, 1 byte]
+//
+// String key escaping:
+//   0x00 -> 0x01 0x01
+//   0x01 -> 0x01 0x02
+//   else -> unchanged
+//
+// The final 0x00 byte appears only as the string terminator, so adjacent key
+// fields can be decoded unambiguously.
+
 // EncodeVal appends the cell's binary value form to toAppend.
 func (cell *Cell) EncodeVal(toAppend []byte) []byte {
 	switch cell.Type {

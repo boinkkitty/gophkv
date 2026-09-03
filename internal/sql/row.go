@@ -22,6 +22,30 @@ type Row []Cell
 
 var ErrBadKey = errors.New("bad key")
 
+// Row binary formats:
+//
+// Key:
+//   [table name bytes]
+//   [0x00 table terminator, 1 byte]
+//   [primary-key field 1 bytes]
+//   [primary-key field 2 bytes]
+//   ...
+//   [primary-key field N bytes]
+//
+// Each primary-key field is encoded by Cell.EncodeKey in the exact order listed
+// in schema.PKey.
+//
+// Value:
+//   [non-primary-key field 1 bytes]
+//   [non-primary-key field 2 bytes]
+//   ...
+//   [non-primary-key field N bytes]
+//
+// Each non-primary-key field is encoded by Cell.EncodeVal in schema column
+// order. Integer values use little-endian in the value payload. Integer keys
+// use big-endian with the sign bit flipped so byte ordering matches numeric
+// ordering.
+
 // NewRow allocates a row sized to the schema's column count.
 func (schema *Schema) NewRow() Row {
 	return make(Row, len(schema.Cols))
