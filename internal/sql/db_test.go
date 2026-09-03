@@ -105,6 +105,41 @@ func TestSQLByPKey(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, []Row{{Cell{Type: TypeI64, I64: 456}}}, r.Values)
 
+	s = "insert into link values (123, 'cde', 'fgh');"
+	r, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, 1, r.Updated)
+
+	s = "select time from link where src >= 'b';"
+	r, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, []Row{{makeCell(456)}, {makeCell(123)}}, r.Values)
+
+	s = "select time from link where 'b' <= src;"
+	r, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, []Row{{makeCell(456)}, {makeCell(123)}}, r.Values)
+
+	s = "select time from link where src <= 'z';"
+	r, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, []Row{{makeCell(123)}, {makeCell(456)}}, r.Values)
+
+	s = "select time from link where 'cde' > src;"
+	r, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, []Row{{makeCell(456)}}, r.Values)
+
+	s = "select time from link where (src, dst) >= ('bob', 'alice');"
+	r, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, []Row{{makeCell(456)}, {makeCell(123)}}, r.Values)
+
+	s = "select time from link where (src, dst) >= ('bob', 'alicf');"
+	r, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, []Row{{makeCell(123)}}, r.Values)
+
 	err = db.Close()
 	require.Nil(t, err)
 	db = DB{}

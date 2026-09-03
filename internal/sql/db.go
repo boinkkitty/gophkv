@@ -254,30 +254,29 @@ func lookupColumns(cols []Column, names []string) (indices []int, err error) {
 	return
 }
 
-// makePKey builds a primary-key row from parsed key expressions.
-func makePKey(schema *Schema, pkey []NamedCell) (Row, error) {
+// extractPKey converts equality matches into a primary-key cell prefix.
+func extractPKey(schema *Schema, pkey []NamedCell) ([]Cell, bool) {
 	if len(schema.PKey) != len(pkey) {
-		return nil, errors.New("not primary key")
+		return nil, false
 	}
-	row := schema.NewRow()
-	for _, idx1 := range schema.PKey {
-		col := schema.Cols[idx1]
-		idx2 := slices.IndexFunc(pkey, func(expr NamedCell) bool {
+	cells := make([]Cell, 0, len(schema.PKey))
+	for _, idx := range schema.PKey {
+		col := schema.Cols[idx]
+		match := slices.IndexFunc(pkey, func(expr NamedCell) bool {
 			return expr.Column == col.Name && expr.Value.Type == col.Type
 		})
-		if idx2 < 0 {
-			return nil, errors.New("not primary key")
+		if match < 0 {
+			return nil, false
 		}
-		row[idx1] = pkey[idx2].Value
+		cells = append(cells, pkey[match].Value)
 	}
-	return row, nil
+	return cells, true
 }
 
-// matchAllEq flattens a boolean AND tree of equality comparisons into named cells.
+// matchAllEq flattens an AND tree of equality expressions into name/value pairs.
 func matchAllEq(cond interface{}, out []NamedCell) ([]NamedCell, bool) {
 	binop, ok := cond.(*ExprBinOp)
 	if ok && binop.op == OP_AND {
-		var ok bool
 		if out, ok = matchAllEq(binop.left, out); !ok {
 			return nil, false
 		}
@@ -305,38 +304,198 @@ func matchAllEq(cond interface{}, out []NamedCell) ([]NamedCell, bool) {
 	return nil, false
 }
 
-// matchPKey extracts a full primary key row from a supported WHERE condition tree.
-func matchPKey(schema *Schema, cond interface{}) (Row, error) {
+// asNameList converts either a single column name or a tuple of names into a slice.
+func asNameList(expr interface{}) ([]string, bool) {
+	switch e := expr.(type) {
+	case string:
+		return []string{e}, true
+	case *ExprTuple:
+		out := make([]string, 0, len(e.Kids))
+		for _, kid := range e.Kids {
+			name, ok := kid.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, name)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+// asCellList converts either a single literal cell or a tuple of cells into a slice.
+func asCellList(expr interface{}) ([]Cell, bool) {
+	switch e := expr.(type) {
+	case *Cell:
+		return []Cell{*e}, true
+	case *ExprTuple:
+		out := make([]Cell, 0, len(e.Kids))
+		for _, kid := range e.Kids {
+			cell, ok := kid.(*Cell)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, *cell)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+// matchCmp extracts a comparison operator and normalized operands from an AST node.
+func matchCmp(cond interface{}) (ExprOp, []string, []Cell, bool) {
+	binop, ok := cond.(*ExprBinOp)
+	if !ok {
+		return 0, nil, nil, false
+	}
+	switch binop.op {
+	case OP_LE, OP_GE, OP_LT, OP_GT:
+	default:
+		return 0, nil, nil, false
+	}
+
+	op := binop.op
+	left, right := binop.left, binop.right
+	names, ok := asNameList(left)
+	if !ok {
+		left, right = right, left
+		names, ok = asNameList(left)
+		switch op {
+		case OP_LE:
+			op = OP_GE
+		case OP_GE:
+			op = OP_LE
+		case OP_LT:
+			op = OP_GT
+		case OP_GT:
+			op = OP_LT
+		}
+	}
+	if !ok {
+		return 0, nil, nil, false
+	}
+	cells, ok := asCellList(right)
+	if !ok {
+		return 0, nil, nil, false
+	}
+	return op, names, cells, true
+}
+
+// isPKeyPrefix reports whether cols/cells match the table primary-key prefix.
+func isPKeyPrefix(schema *Schema, cols []string, cells []Cell) bool {
+	if len(cols) != len(cells) || len(cols) > len(schema.PKey) {
+		return false
+	}
+	for i := range cols {
+		col := schema.Cols[schema.PKey[i]]
+		if col.Name != cols[i] || col.Type != cells[i].Type {
+			return false
+		}
+	}
+	return true
+}
+
+// matchRange converts inequality predicates on the primary-key prefix into a range scan.
+func matchRange(schema *Schema, cond interface{}) (*RangeReq, bool) {
+	binop, ok := cond.(*ExprBinOp)
+	if ok && binop.op == OP_AND {
+		op1, cols1, cells1, ok := matchCmp(binop.left)
+		if !ok || !isPKeyPrefix(schema, cols1, cells1) {
+			return nil, false
+		}
+		op2, cols2, cells2, ok := matchCmp(binop.right)
+		if !ok || !isPKeyPrefix(schema, cols2, cells2) {
+			return nil, false
+		}
+		if isDescending(op1) == isDescending(op2) {
+			return nil, false
+		}
+		if isDescending(op1) {
+			op1, op2 = op2, op1
+			cells1, cells2 = cells2, cells1
+		}
+		return &RangeReq{
+			StartCmp: op1,
+			StopCmp:  op2,
+			Start:    cells1,
+			Stop:     cells2,
+		}, true
+	}
+
+	op, cols, cells, ok := matchCmp(cond)
+	if !ok || !isPKeyPrefix(schema, cols, cells) {
+		return nil, false
+	}
+	stopCmp := OP_LE
+	if isDescending(op) {
+		stopCmp = OP_GE
+	}
+	return &RangeReq{
+		StartCmp: op,
+		StopCmp:  stopCmp,
+		Start:    cells,
+		Stop:     nil,
+	}, true
+}
+
+// makeRange turns a supported WHERE expression into a primary-key range request.
+func makeRange(schema *Schema, cond interface{}) (*RangeReq, error) {
 	if keys, ok := matchAllEq(cond, nil); ok {
-		return makePKey(schema, keys)
+		if pkey, ok := extractPKey(schema, keys); ok {
+			return &RangeReq{
+				StartCmp: OP_GE,
+				StopCmp:  OP_LE,
+				Start:    pkey,
+				Stop:     pkey,
+			}, nil
+		}
+	}
+	if req, ok := matchRange(schema, cond); ok {
+		return req, nil
 	}
 	return nil, errors.New("unimplemented WHERE")
 }
 
-// execSelect executes a parsed SELECT statement.
+// execCond resolves a WHERE expression into the row iterator used by statement execution.
+func (db *DB) execCond(schema *Schema, cond interface{}) (*RowIterator, error) {
+	req, err := makeRange(schema, cond)
+	if err != nil {
+		return nil, err
+	}
+	return db.Range(schema, req)
+}
+
+// execSelect executes a parsed SELECT statement over a primary-key range.
 func (db *DB) execSelect(stmt *StmtSelect) ([]Row, error) {
 	schema, err := db.GetSchema(stmt.Table)
 	if err != nil {
 		return nil, err
 	}
 
-	row, err := matchPKey(&schema, stmt.Cond)
+	iter, err := db.execCond(&schema, stmt.Cond)
 	if err != nil {
 		return nil, err
 	}
-	if ok, err := db.Select(&schema, row); err != nil || !ok {
+
+	output := []Row{}
+	for ; err == nil && iter.Valid(); err = iter.Next() {
+		row := iter.Row()
+		computed := make(Row, len(stmt.Cols))
+		for i, expr := range stmt.Cols {
+			cell, err := evalExpr(&schema, row, expr)
+			if err != nil {
+				return nil, err
+			}
+			computed[i] = *cell
+		}
+		output = append(output, computed)
+	}
+	if err != nil {
 		return nil, err
 	}
-
-	out := make(Row, len(stmt.Cols))
-	for i, expr := range stmt.Cols {
-		cell, err := evalExpr(&schema, row, expr)
-		if err != nil {
-			return nil, err
-		}
-		out[i] = *cell
-	}
-	return []Row{out}, nil
+	return output, nil
 }
 
 // execInsert executes a parsed INSERT statement.
@@ -378,61 +537,70 @@ func fillNonPKey(schema *Schema, updates []NamedCell, out Row) error {
 	return nil
 }
 
-// execUpdate executes a parsed UPDATE statement.
+// execUpdate executes a parsed UPDATE statement over a primary-key range.
 func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error) {
 	schema, err := db.GetSchema(stmt.Table)
 	if err != nil {
 		return 0, err
 	}
 
-	row, err := matchPKey(&schema, stmt.Cond)
+	iter, err := db.execCond(&schema, stmt.Cond)
 	if err != nil {
 		return 0, err
 	}
-	if ok, err := db.Select(&schema, row); err != nil || !ok {
-		return 0, err
-	}
 
-	updates := make([]NamedCell, len(stmt.Value))
-	for i, assign := range stmt.Value {
-		cell, err := evalExpr(&schema, row, assign.expr)
+	for ; err == nil && iter.Valid(); err = iter.Next() {
+		row := iter.Row()
+		updates := make([]NamedCell, len(stmt.Value))
+		for i, assign := range stmt.Value {
+			cell, err := evalExpr(&schema, row, assign.expr)
+			if err != nil {
+				return 0, err
+			}
+			updates[i] = NamedCell{Column: assign.column, Value: *cell}
+		}
+
+		if err = fillNonPKey(&schema, updates, row); err != nil {
+			return 0, err
+		}
+		updated, err := db.Update(&schema, row)
 		if err != nil {
 			return 0, err
 		}
-		updates[i] = NamedCell{Column: assign.column, Value: *cell}
+		if updated {
+			count++
+		}
 	}
-
-	if err = fillNonPKey(&schema, updates, row); err != nil {
-		return 0, err
-	}
-	updated, err := db.Update(&schema, row)
 	if err != nil {
 		return 0, err
-	}
-	if updated {
-		count++
 	}
 	return count, nil
 }
 
-// execDelete executes a parsed DELETE statement.
+// execDelete executes a parsed DELETE statement over a primary-key range.
 func (db *DB) execDelete(stmt *StmtDelete) (count int, err error) {
 	schema, err := db.GetSchema(stmt.Table)
 	if err != nil {
 		return 0, err
 	}
 
-	row, err := matchPKey(&schema, stmt.Cond)
+	iter, err := db.execCond(&schema, stmt.Cond)
 	if err != nil {
 		return 0, err
 	}
 
-	updated, err := db.Delete(&schema, row)
+	for ; err == nil && iter.Valid(); err = iter.Next() {
+		row := iter.Row()
+		updated, err := db.Delete(&schema, row)
+		if err != nil {
+			return 0, err
+		}
+		if updated {
+			count++
+		}
+	}
 	if err != nil {
 		return 0, err
-	}
-	if updated {
-		count++
 	}
 	return count, nil
 }

@@ -497,17 +497,41 @@ type ExprUnOp struct {
 	kid interface{}
 }
 
-// parseAtom parses a single expression atom as either an identifier or literal cell.
-func (p *Parser) parseAtom() (interface{}, error) {
-	if p.tryPunctuation("(") {
+// ExprTuple represents a parenthesized expression tuple in the parsed AST.
+type ExprTuple struct {
+	Kids []interface{}
+}
+
+// parseTuple parses a parenthesized comma-separated tuple expression.
+// A single element tuple collapses back to that element.
+func (p *Parser) parseTuple() (interface{}, error) {
+	kids := []interface{}{}
+	err := p.parseCommaList(func() error {
 		expr, err := p.parseExpr()
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if !p.tryPunctuation(")") {
-			return nil, errors.New("expect )")
-		}
-		return expr, nil
+		kids = append(kids, expr)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(kids) == 0 {
+		return nil, errors.New("empty tuple")
+	}
+	if len(kids) == 1 {
+		return kids[0], nil
+	}
+	return &ExprTuple{Kids: kids}, nil
+}
+
+// parseAtom parses a single expression atom as either a tuple,
+// identifier, or literal cell.
+func (p *Parser) parseAtom() (interface{}, error) {
+	if p.tryPunctuation("(") {
+		p.pos--
+		return p.parseTuple()
 	}
 
 	if name, ok := p.tryName(); ok {
