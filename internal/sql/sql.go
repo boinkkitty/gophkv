@@ -54,6 +54,8 @@ type ExprOp uint8
 const (
 	OP_ADD ExprOp = 1  // +
 	OP_SUB ExprOp = 2  // -
+	OP_MUL ExprOp = 3  // *
+	OP_DIV ExprOp = 4  // /
 	OP_LE  ExprOp = 12 // <=
 	OP_GE  ExprOp = 13 // >=
 	OP_LT  ExprOp = 14 // <
@@ -446,6 +448,17 @@ type ExprBinOp struct {
 
 // parseAtom parses a single expression atom as either an identifier or literal cell.
 func (p *Parser) parseAtom() (interface{}, error) {
+	if p.tryPunctuation("(") {
+		expr, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if !p.tryPunctuation(")") {
+			return nil, errors.New("expect )")
+		}
+		return expr, nil
+	}
+
 	if name, ok := p.tryName(); ok {
 		return name, nil
 	}
@@ -456,15 +469,50 @@ func (p *Parser) parseAtom() (interface{}, error) {
 	return cell, nil
 }
 
-// parseAdd parses a left-associative chain of + and - operations over atoms.
+// parseExpression parses expression at highest level
+func (p *Parser) parseExpr() (interface{}, error) {
+	return p.parseAdd()
+}
+
+// parseAdd parses a left-associative chain of + and - operations over muls.
 func (p *Parser) parseAdd() (interface{}, error) {
-	left, err := p.parseAtom()
+	left, err := p.parseMul()
 	if err != nil {
 		return nil, err
 	}
 
 	tokens := []string{"+", "-"}
 	ops := []ExprOp{OP_ADD, OP_SUB}
+
+	for ok := true; ok; {
+		ok = false
+		for i := range tokens {
+			if !p.tryPunctuation(tokens[i]) {
+				continue
+			}
+
+			ok = true
+			right, err := p.parseMul()
+			if err != nil {
+				return nil, err
+			}
+			left = &ExprBinOp{op: ops[i], left: left, right: right}
+			break
+		}
+	}
+
+	return left, nil
+}
+
+// parseMul parses a left-associative chain of * and / operations over atoms.
+func (p *Parser) parseMul() (interface{}, error) {
+	left, err := p.parseAtom()
+	if err != nil {
+		return nil, err
+	}
+
+	tokens := []string{"*", "/"}
+	ops := []ExprOp{OP_MUL, OP_DIV}
 
 	for ok := true; ok; {
 		ok = false
