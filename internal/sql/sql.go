@@ -18,13 +18,19 @@ func NewParser(s string) Parser {
 
 type StmtSelect struct {
 	Table string
-	Cols  []string
+	Cols  []interface{} // ExprUnOp | ExprBinOp | string | *Cell
 	Keys  []NamedCell
 }
 
 type NamedCell struct {
 	Column string
 	Value  Cell
+}
+
+// ExprAssign stores one parsed column assignment expression from an UPDATE statement.
+type ExprAssign struct {
+	column string
+	expr   interface{} // ExprUnOp | ExprBinOp | string | *Cell
 }
 
 type StmtCreatTable struct {
@@ -41,7 +47,7 @@ type StmtInsert struct {
 type StmtUpdate struct {
 	Table string
 	Keys  []NamedCell
-	Value []NamedCell
+	Value []ExprAssign
 }
 
 type StmtDelete struct {
@@ -230,17 +236,35 @@ func (p *Parser) parseEqual(out *NamedCell) error {
 	return p.parseValue(&out.Value)
 }
 
+// parseAssign parses one UPDATE assignment of the form column = expression.
+func (p *Parser) parseAssign(out *ExprAssign) error {
+	var ok bool
+	out.column, ok = p.tryName()
+	if !ok {
+		return errors.New("expect column")
+	}
+	if !p.tryPunctuation("=") {
+		return errors.New("expect =")
+	}
+	expr, err := p.parseExpr()
+	if err != nil {
+		return err
+	}
+	out.expr = expr
+	return nil
+}
+
 // parseSelect parses a SELECT statement into out.
 func (p *Parser) parseSelect(out *StmtSelect) error {
 	for !p.tryKeyword("FROM") {
 		if len(out.Cols) > 0 && !p.tryPunctuation(",") {
 			return errors.New("expect comma")
 		}
-		if name, ok := p.tryName(); ok {
-			out.Cols = append(out.Cols, name)
-		} else {
-			return errors.New("expect column")
+		expr, err := p.parseExpr()
+		if err != nil {
+			return err
 		}
+		out.Cols = append(out.Cols, expr)
 	}
 	if len(out.Cols) == 0 {
 		return errors.New("expect column list")
@@ -381,11 +405,11 @@ func (p *Parser) parseUpdate(out *StmtUpdate) error {
 		return errors.New("expect SET")
 	}
 	for !p.tryKeyword("WHERE") {
-		expr := NamedCell{}
+		expr := ExprAssign{}
 		if len(out.Value) > 0 && !p.tryKeyword(",") {
 			return errors.New("expect ,")
 		}
-		if err := p.parseEqual(&expr); err != nil {
+		if err := p.parseAssign(&expr); err != nil {
 			return err
 		}
 		out.Value = append(out.Value, expr)

@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"errors"
 	"slices"
+	"strconv"
 )
 
 // evalExpr evaluates an expression AST against a row using a tree-walk interpreter.
@@ -112,4 +113,84 @@ func evalExpr(schema *Schema, row Row, expr interface{}) (*Cell, error) {
 	default:
 		panic("unreachable")
 	}
+}
+
+// cell2str renders one cell value into its SQL-style expression string.
+func cell2str(cell *Cell) string {
+	switch cell.Type {
+	case TypeI64:
+		return strconv.FormatInt(cell.I64, 10)
+	case TypeStr:
+		return string(cell.Str)
+	default:
+		panic("unreachable")
+	}
+}
+
+// exprop2str renders one expression operator into its SQL token spelling.
+func exprop2str(op ExprOp) string {
+	switch op {
+	case OP_ADD:
+		return "+"
+	case OP_SUB:
+		return "-"
+	case OP_MUL:
+		return "*"
+	case OP_DIV:
+		return "/"
+	case OP_EQ:
+		return "="
+	case OP_NE:
+		return "!="
+	case OP_LE:
+		return "<="
+	case OP_GE:
+		return ">="
+	case OP_LT:
+		return "<"
+	case OP_GT:
+		return ">"
+	case OP_AND:
+		return "AND"
+	case OP_OR:
+		return "OR"
+	case OP_NOT:
+		return "NOT"
+	case OP_NEG:
+		return "-"
+	default:
+		panic("unreachable")
+	}
+}
+
+// expr2str renders one parsed expression into a stable SQL-style string.
+func expr2str(expr interface{}) string {
+	switch e := expr.(type) {
+	case string:
+		return e
+	case *Cell:
+		return cell2str(e)
+	case *ExprUnOp:
+		switch e.op {
+		case OP_NEG:
+			return "-" + expr2str(e.kid)
+		case OP_NOT:
+			return "NOT " + expr2str(e.kid)
+		default:
+			panic("unreachable")
+		}
+	case *ExprBinOp:
+		return "(" + expr2str(e.left) + " " + exprop2str(e.op) + " " + expr2str(e.right) + ")"
+	default:
+		panic("unreachable")
+	}
+}
+
+// exprs2header renders a SELECT expression list into result header strings.
+func exprs2header(cols []interface{}) []string {
+	header := make([]string, 0, len(cols))
+	for _, expr := range cols {
+		header = append(header, expr2str(expr))
+	}
+	return header
 }

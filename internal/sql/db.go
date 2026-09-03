@@ -183,7 +183,7 @@ func (db *DB) ExecStmt(stmt interface{}) (r SQLResult, err error) {
 	case *StmtCreatTable:
 		err = db.execCreateTable(ptr)
 	case *StmtSelect:
-		r.Header = ptr.Cols
+		r.Header = exprs2header(ptr.Cols)
 		r.Values, err = db.execSelect(ptr)
 	case *StmtInsert:
 		r.Updated, err = db.execInsert(ptr)
@@ -287,10 +287,6 @@ func (db *DB) execSelect(stmt *StmtSelect) ([]Row, error) {
 	if err != nil {
 		return nil, err
 	}
-	indices, err := lookupColumns(schema.Cols, stmt.Cols)
-	if err != nil {
-		return nil, err
-	}
 
 	row, err := makePKey(&schema, stmt.Keys)
 	if err != nil {
@@ -300,8 +296,15 @@ func (db *DB) execSelect(stmt *StmtSelect) ([]Row, error) {
 		return nil, err
 	}
 
-	row = subsetRow(row, indices)
-	return []Row{row}, nil
+	out := make(Row, len(stmt.Cols))
+	for i, expr := range stmt.Cols {
+		cell, err := evalExpr(&schema, row, expr)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = *cell
+	}
+	return []Row{out}, nil
 }
 
 // execInsert executes a parsed INSERT statement.
@@ -358,7 +361,16 @@ func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error) {
 		return 0, err
 	}
 
-	if err = fillNonPKey(&schema, stmt.Value, row); err != nil {
+	updates := make([]NamedCell, len(stmt.Value))
+	for i, assign := range stmt.Value {
+		cell, err := evalExpr(&schema, row, assign.expr)
+		if err != nil {
+			return 0, err
+		}
+		updates[i] = NamedCell{Column: assign.column, Value: *cell}
+	}
+
+	if err = fillNonPKey(&schema, updates, row); err != nil {
 		return 0, err
 	}
 	updated, err := db.Update(&schema, row)
