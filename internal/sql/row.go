@@ -20,8 +20,6 @@ type Column struct {
 
 type Row []Cell
 
-var ErrBadKey = errors.New("bad key")
-
 // Row binary formats:
 //
 // Key:
@@ -78,14 +76,16 @@ func (row Row) EncodeVal(schema *Schema) []byte {
 	return val
 }
 
+var ErrOutOfRange = errors.New("out of range")
+
 // DecodeKey decodes a key buffer into the row's primary-key columns.
 func (row Row) DecodeKey(schema *Schema, key []byte) error {
 	utils.Check(len(row) == len(schema.Cols))
 	if len(key) < len(schema.Table)+1 {
-		return ErrBadKey
+		return ErrOutOfRange
 	}
 	if string(key[:len(schema.Table)+1]) != schema.Table+"\x00" {
-		return ErrBadKey
+		return ErrOutOfRange
 	}
 	key = key[len(schema.Table)+1:]
 

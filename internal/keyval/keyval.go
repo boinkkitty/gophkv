@@ -124,6 +124,7 @@ type KVIterator struct {
 	pos  int
 }
 
+// Seek returns an iterator positioned at the first key >= key.
 func (kv *KV) Seek(key []byte) (*KVIterator, error) {
 	pos, _ := slices.BinarySearchFunc(kv.keys, key, bytes.Compare)
 	return &KVIterator{
@@ -133,20 +134,24 @@ func (kv *KV) Seek(key []byte) (*KVIterator, error) {
 	}, nil
 }
 
+// Valid reports whether the iterator points at an existing entry.
 func (iter *KVIterator) Valid() bool {
 	return 0 <= iter.pos && iter.pos < len(iter.keys)
 }
 
+// Key returns the iterator's current key.
 func (iter *KVIterator) Key() []byte {
 	utils.Check(iter.Valid())
 	return iter.keys[iter.pos]
 }
 
+// Val returns the iterator's current value.
 func (iter *KVIterator) Val() []byte {
 	utils.Check(iter.Valid())
 	return iter.vals[iter.pos]
 }
 
+// Next advances the iterator by one position.
 func (iter *KVIterator) Next() error {
 	if iter.pos < len(iter.keys) {
 		iter.pos++
@@ -154,6 +159,7 @@ func (iter *KVIterator) Next() error {
 	return nil
 }
 
+// Prev moves the iterator back by one position.
 func (iter *KVIterator) Prev() error {
 	if iter.pos >= 0 {
 		iter.pos--

@@ -63,6 +63,70 @@ func (db *DB) Delete(schema *Schema, row Row) (deleted bool, err error) {
 	return db.KV.Del(key)
 }
 
+type RowIterator struct {
+	schema *Schema
+	iter   *keyval.KVIterator
+	valid  bool // decode result (err != ErrOutOfRange)
+	row    Row  // decode result
+}
+
+// decodeKVIter decodes KVITerator into row primary columns.
+func decodeKVIter(schema *Schema, iter *keyval.KVIterator, row Row) (bool, error) {
+	// Check iter valid
+	if !iter.Valid() {
+		return false, nil
+	}
+	// Decode Key
+	if err := row.DecodeKey(schema, iter.Key()); err == ErrOutOfRange {
+		return false, nil // OOR
+	} else if err != nil {
+		return false, err
+	}
+	// Decode Val
+	if err := row.DecodeVal(schema, iter.Val()); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Is iteration finished?
+func (iter *RowIterator) Valid() bool {
+	return iter.valid
+}
+
+// Row checks iterator current row.
+func (iter *RowIterator) Row() Row {
+	utils.Check(iter.valid)
+	return iter.row
+}
+
+// Next moves iterator forward to next row.
+func (iter *RowIterator) Next() (err error) {
+	if err = iter.iter.Next(); err != nil {
+		return err
+	}
+	iter.valid, err = decodeKVIter(iter.schema, iter.iter, iter.row)
+	return err
+}
+
+// Seek returns the first position >= primary key.
+func (db *DB) Seek(schema *Schema, row Row) (*RowIterator, error) {
+	iter, err := db.KV.Seek(row.EncodeKey(schema))
+	if err != nil {
+		return nil, err
+	}
+	valid, err := decodeKVIter(schema, iter, row)
+	if err != nil {
+		return nil, err
+	}
+	return &RowIterator{
+		schema,
+		iter,
+		valid,
+		row,
+	}, nil
+}
+
 type SQLResult struct {
 	Updated int
 	Header  []string
