@@ -49,6 +49,15 @@ type StmtDelete struct {
 	Keys  []NamedCell
 }
 
+type ExprOp uint8
+
+const (
+	OP_LE ExprOp = 12 // <=
+	OP_GE ExprOp = 13 // >=
+	OP_LT ExprOp = 14 // <
+	OP_GT ExprOp = 15 // >
+)
+
 // isSpace reports whether ch is an ASCII whitespace character.
 func isSpace(ch byte) bool {
 	switch ch {

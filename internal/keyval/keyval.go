@@ -113,6 +113,7 @@ func (kv *KV) Del(key []byte) (bool, error) {
 			return false, err
 		}
 		kv.keys = slices.Delete(kv.keys, idx, idx+1)
+		kv.vals = slices.Delete(kv.vals, idx, idx+1)
 		return true, nil
 	}
 	return false, nil
@@ -165,4 +166,69 @@ func (iter *KVIterator) Prev() error {
 		iter.pos--
 	}
 	return nil
+}
+
+// RangedKVIter wraps a KVIterator with inclusive start/stop bounds.
+// desc == false: query start <= key && key <= stop
+// desc == true: query start >= key && key >= stop
+type RangedKVIter struct {
+	iter KVIterator
+	stop []byte
+	desc bool // flag for desc and asc order by
+}
+
+// Key returns the current key within the bounded range.
+func (iter *RangedKVIter) Key() []byte {
+	return iter.iter.Key()
+}
+
+// Val returns the current value within the bounded range.
+func (iter *RangedKVIter) Val() []byte {
+	return iter.iter.Val()
+}
+
+// Valid reports whether the iterator is still within the requested bounds.
+func (iter *RangedKVIter) Valid() bool {
+	if !iter.iter.Valid() {
+		return false
+	}
+	r := bytes.Compare(iter.iter.Key(), iter.stop)
+	if iter.desc && r < 0 {
+		return false
+	} else if !iter.desc && r > 0 {
+		return false
+	}
+	return true
+}
+
+// Next advances in the configured scan direction until the range is exhausted.
+func (iter *RangedKVIter) Next() error {
+	if !iter.Valid() {
+		return nil
+	}
+	if iter.desc {
+		return iter.iter.Prev()
+	} else {
+		return iter.iter.Next()
+	}
+}
+
+// Range returns an iterator that starts at start and stops once stop is crossed.
+// In ascending mode it yields keys in [start, stop]. In descending mode it yields
+// keys in [stop, start], starting from the greatest key <= start.
+func (kv *KV) Range(start, stop []byte, desc bool) (*RangedKVIter, error) {
+	iter, err := kv.Seek(start)
+	if err != nil {
+		return nil, err
+	}
+	if desc && (!iter.Valid() || bytes.Compare(iter.Key(), start) > 0) {
+		if err = iter.Prev(); err != nil {
+			return nil, err
+		}
+	}
+	return &RangedKVIter{
+		iter: *iter,
+		stop: stop,
+		desc: desc,
+	}, nil
 }

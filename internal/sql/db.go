@@ -65,42 +65,38 @@ func (db *DB) Delete(schema *Schema, row Row) (deleted bool, err error) {
 
 type RowIterator struct {
 	schema *Schema
-	iter   *keyval.KVIterator
-	valid  bool // decode result (err != ErrOutOfRange)
-	row    Row  // decode result
+	iter   *keyval.RangedKVIter
+	valid  bool
+	row    Row
 }
 
-// decodeKVIter decodes KVITerator into row primary columns.
-func decodeKVIter(schema *Schema, iter *keyval.KVIterator, row Row) (bool, error) {
-	// Check iter valid
+// decodeKVIter decodes the current key/value entry into row.
+func decodeKVIter(schema *Schema, iter *keyval.RangedKVIter, row Row) (bool, error) {
 	if !iter.Valid() {
 		return false, nil
 	}
-	// Decode Key
-	if err := row.DecodeKey(schema, iter.Key()); err == ErrOutOfRange {
-		return false, nil // OOR
-	} else if err != nil {
+	if err := row.DecodeKey(schema, iter.Key()); err != nil {
+		utils.Check(err != ErrOutOfRange)
 		return false, err
 	}
-	// Decode Val
 	if err := row.DecodeVal(schema, iter.Val()); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-// Is iteration finished?
+// Valid reports whether the iterator is positioned on a row.
 func (iter *RowIterator) Valid() bool {
 	return iter.valid
 }
 
-// Row checks iterator current row.
+// Row returns the current decoded row.
 func (iter *RowIterator) Row() Row {
 	utils.Check(iter.valid)
 	return iter.row
 }
 
-// Next moves iterator forward to next row.
+// Next advances the iterator to the next row in scan order.
 func (iter *RowIterator) Next() (err error) {
 	if err = iter.iter.Next(); err != nil {
 		return err
@@ -109,22 +105,70 @@ func (iter *RowIterator) Next() (err error) {
 	return err
 }
 
-// Seek returns the first position >= primary key.
+// Seek returns the first row whose primary key is >= the provided key prefix.
 func (db *DB) Seek(schema *Schema, row Row) (*RowIterator, error) {
-	iter, err := db.KV.Seek(row.EncodeKey(schema))
+	start := make([]Cell, len(schema.PKey))
+	for i, idx := range schema.PKey {
+		utils.Check(row[idx].Type == schema.Cols[idx].Type)
+		start[i] = row[idx]
+	}
+	return db.Range(schema, &RangeReq{
+		StartCmp: OP_GE,
+		StopCmp:  OP_LE,
+		Start:    start,
+		Stop:     nil,
+	})
+}
+
+// RangeReq describes a bounded primary-key scan.
+type RangeReq struct {
+	StartCmp ExprOp
+	StopCmp  ExprOp
+	Start    []Cell
+	Stop     []Cell
+}
+
+// suffixPositive reports whether a comparison boundary should be encoded with
+// the 0xFF positive suffix so the bound falls just above the raw prefix.
+func suffixPositive(op ExprOp) bool {
+	switch op {
+	case OP_LE, OP_GT:
+		return true
+	case OP_GE, OP_LT:
+		return false
+	default:
+		panic("unreachable")
+	}
+}
+
+// isDescending reports whether a range using op should scan keys in reverse.
+func isDescending(op ExprOp) bool {
+	switch op {
+	case OP_LE, OP_LT:
+		return true
+	case OP_GE, OP_GT:
+		return false
+	default:
+		panic("unreachable")
+	}
+}
+
+// Range returns an iterator over the requested primary-key interval.
+func (db *DB) Range(schema *Schema, req *RangeReq) (*RowIterator, error) {
+	utils.Check(isDescending(req.StartCmp) != isDescending(req.StopCmp))
+	start := EncodeKeyPrefix(schema, req.Start, suffixPositive(req.StartCmp))
+	stop := EncodeKeyPrefix(schema, req.Stop, suffixPositive(req.StopCmp))
+	desc := isDescending(req.StartCmp)
+	iter, err := db.KV.Range(start, stop, desc)
 	if err != nil {
 		return nil, err
 	}
+	row := schema.NewRow()
 	valid, err := decodeKVIter(schema, iter, row)
 	if err != nil {
 		return nil, err
 	}
-	return &RowIterator{
-		schema,
-		iter,
-		valid,
-		row,
-	}, nil
+	return &RowIterator{schema, iter, valid, row}, nil
 }
 
 type SQLResult struct {
