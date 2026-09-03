@@ -39,7 +39,7 @@ func TestTableByPKey(t *testing.T) {
 	assert.True(t, updated && err == nil)
 
 	out := Row{
-		Cell{Type: TypeI64},
+		Cell{},
 		Cell{Type: TypeStr, Str: []byte("a")},
 		Cell{Type: TypeStr, Str: []byte("b")},
 	}

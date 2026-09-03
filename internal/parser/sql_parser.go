@@ -24,6 +24,28 @@ type StmtSelect struct {
 	keys  []NamedCell
 }
 
+type StmtCreatTable struct {
+	table string
+	cols  []table.Column
+	pkey  []string
+}
+
+type StmtInsert struct {
+	table string
+	value []table.Cell
+}
+
+type StmtUpdate struct {
+	table string
+	keys  []NamedCell
+	value []NamedCell
+}
+
+type StmtDelete struct {
+	table string
+	keys  []NamedCell
+}
+
 type NamedCell struct {
 	column string
 	value  table.Cell
@@ -70,20 +92,27 @@ func (p *Parser) skipSpaces() {
 	}
 }
 
-// tryKeyword consumes kw if it appears at the current position.
-func (p *Parser) tryKeyword(kw string) bool {
-	p.skipSpaces()
-	if !(p.pos+len(kw) <= len(p.buf) && strings.EqualFold(p.buf[p.pos:p.pos+len(kw)], kw)) {
-		return false
+// tryKeyword consumes the given keywords if they appear in sequence.
+// Example: SELECT, CREATE TABLE, or DELETE FROM.
+func (p *Parser) tryKeyword(kws ...string) bool {
+	save := p.pos
+	for _, kw := range kws {
+		p.skipSpaces()
+		if !(p.pos+len(kw) <= len(p.buf) && strings.EqualFold(p.buf[p.pos:p.pos+len(kw)], kw)) {
+			p.pos = save
+			return false
+		}
+		if p.pos+len(kw) < len(p.buf) && !isSeparator(p.buf[p.pos+len(kw)]) {
+			p.pos = save
+			return false
+		}
+		p.pos += len(kw)
 	}
-	if p.pos+len(kw) < len(p.buf) && !isSeparator(p.buf[p.pos+len(kw)]) {
-		return false
-	}
-	p.pos += len(kw)
 	return true
 }
 
 // tryPunctuation consumes token if it appears at the current position.
+// Example: ,, (, ), ;, or =.
 func (p *Parser) tryPunctuation(token string) bool {
 	p.skipSpaces()
 	if !(p.pos+len(token) <= len(p.buf) && p.buf[p.pos:p.pos+len(token)] == token) {
@@ -94,6 +123,7 @@ func (p *Parser) tryPunctuation(token string) bool {
 }
 
 // tryName parses an identifier from the current position.
+// Example: a, b_02, or users.
 func (p *Parser) tryName() (string, bool) {
 	p.skipSpaces()
 	start, cur := p.pos, p.pos
@@ -183,9 +213,6 @@ func (p *Parser) parseEqual(out *NamedCell) error {
 
 // parseSelect parses a SELECT statement into out.
 func (p *Parser) parseSelect(out *StmtSelect) error {
-	if !p.tryKeyword("SELECT") {
-		return errors.New("expect keyword")
-	}
 	for !p.tryKeyword("FROM") {
 		if len(out.cols) > 0 && !p.tryPunctuation(",") {
 			return errors.New("expect comma")
@@ -225,6 +252,170 @@ func (p *Parser) parseWhere(out *[]NamedCell) error {
 		return errors.New("expect where clause")
 	}
 	return nil
+}
+
+// parseCommaList parses a parenthesized comma-separated list.
+func (p *Parser) parseCommaList(item func() error) error {
+	if !p.tryPunctuation("(") {
+		return errors.New("expect (")
+	}
+	comma := false
+	for !p.tryPunctuation(")") {
+		if comma && !p.tryPunctuation(",") {
+			return errors.New("expect ,")
+		}
+		comma = true
+		if err := item(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// parseNameItem parses one identifier into out.
+func (p *Parser) parseNameItem(out *[]string) error {
+	name, ok := p.tryName()
+	if !ok {
+		return errors.New("expect name")
+	}
+	*out = append(*out, name)
+	return nil
+}
+
+// parseCreateTableItem parses either a column definition or primary key clause.
+func (p *Parser) parseCreateTableItem(out *StmtCreatTable) error {
+	if p.tryKeyword("PRIMARY", "KEY") {
+		return p.parseCommaList(func() error { return p.parseNameItem(&out.pkey) })
+	}
+
+	var ok bool
+	col := table.Column{}
+	if col.Name, ok = p.tryName(); !ok {
+		return errors.New("expect name")
+	}
+	kind, ok := p.tryName()
+	if !ok {
+		return errors.New("expect name")
+	}
+	switch kind {
+	case "int64":
+		col.Type = table.TypeI64
+	case "string":
+		col.Type = table.TypeStr
+	default:
+		return errors.New("unknown column type")
+	}
+	out.cols = append(out.cols, col)
+	return nil
+}
+
+// parseCreateTable parses a CREATE TABLE statement into out.
+func (p *Parser) parseCreateTable(out *StmtCreatTable) error {
+	var ok bool
+	if out.table, ok = p.tryName(); !ok {
+		return errors.New("expect table name")
+	}
+	if err := p.parseCommaList(func() error { return p.parseCreateTableItem(out) }); err != nil {
+		return err
+	}
+	if !p.tryPunctuation(";") {
+		return errors.New("expect ;")
+	}
+	return nil
+}
+
+// parseValueItem parses one cell value into out.
+func (p *Parser) parseValueItem(out *[]table.Cell) error {
+	cell := table.Cell{}
+	if err := p.parseValue(&cell); err != nil {
+		return err
+	}
+	*out = append(*out, cell)
+	return nil
+}
+
+// parseInsert parses an INSERT statement into out.
+func (p *Parser) parseInsert(out *StmtInsert) error {
+	var ok bool
+	if out.table, ok = p.tryName(); !ok {
+		return errors.New("expect table name")
+	}
+	if !p.tryKeyword("VALUES") {
+		return errors.New("expect VALUES")
+	}
+	if err := p.parseCommaList(func() error { return p.parseValueItem(&out.value) }); err != nil {
+		return err
+	}
+	if !p.tryPunctuation(";") {
+		return errors.New("expect ;")
+	}
+	return nil
+}
+
+// parseUpdate parses an UPDATE statement into out.
+func (p *Parser) parseUpdate(out *StmtUpdate) error {
+	var ok bool
+	if out.table, ok = p.tryName(); !ok {
+		return errors.New("expect table name")
+	}
+	if !p.tryKeyword("SET") {
+		return errors.New("expect SET")
+	}
+	for !p.tryKeyword("WHERE") {
+		expr := NamedCell{}
+		if len(out.value) > 0 && !p.tryKeyword(",") {
+			return errors.New("expect ,")
+		}
+		if err := p.parseEqual(&expr); err != nil {
+			return err
+		}
+		out.value = append(out.value, expr)
+	}
+	if len(out.value) == 0 {
+		return errors.New("expect assignment list")
+	}
+	p.pos -= len("WHERE")
+	return p.parseWhere(&out.keys)
+}
+
+// parseDelete parses a DELETE statement into out.
+func (p *Parser) parseDelete(out *StmtDelete) error {
+	var ok bool
+	if out.table, ok = p.tryName(); !ok {
+		return errors.New("expect table name")
+	}
+	return p.parseWhere(&out.keys)
+}
+
+// parseStmt parses one SQL statement and returns its typed representation.
+func (p *Parser) parseStmt() (out interface{}, err error) {
+	if p.tryKeyword("SELECT") {
+		stmt := &StmtSelect{}
+		err = p.parseSelect(stmt)
+		out = stmt
+	} else if p.tryKeyword("CREATE", "TABLE") {
+		stmt := &StmtCreatTable{}
+		err = p.parseCreateTable(stmt)
+		out = stmt
+	} else if p.tryKeyword("INSERT", "INTO") {
+		stmt := &StmtInsert{}
+		err = p.parseInsert(stmt)
+		out = stmt
+	} else if p.tryKeyword("UPDATE") {
+		stmt := &StmtUpdate{}
+		err = p.parseUpdate(stmt)
+		out = stmt
+	} else if p.tryKeyword("DELETE", "FROM") {
+		stmt := &StmtDelete{}
+		err = p.parseDelete(stmt)
+		out = stmt
+	} else {
+		err = errors.New("unknown statement")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // isEnd reports whether the parser has reached the end of input.

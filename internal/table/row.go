@@ -37,10 +37,9 @@ func (row Row) EncodeKey(schema *Schema) []byte {
 	key = append(key, 0x00) // to know where table is
 
 	utils.Check(len(row) == len(schema.Cols))
-	// Check row type and column type
 	for idx, value := range row {
-		utils.Check(value.Type == schema.Cols[idx].Type)
 		if slices.Contains(schema.PKey, idx) {
+			utils.Check(value.Type == schema.Cols[idx].Type)
 			key = row[idx].Encode(key)
 		}
 	}
@@ -52,8 +51,8 @@ func (row Row) EncodeVal(schema *Schema) []byte {
 	utils.Check(len(row) == len(schema.Cols))
 	val := make([]byte, 0)
 	for idx, value := range row {
-		utils.Check(value.Type == schema.Cols[idx].Type)
 		if !slices.Contains(schema.PKey, idx) {
+			utils.Check(value.Type == schema.Cols[idx].Type)
 			val = row[idx].Encode(val)
 		}
 	}
