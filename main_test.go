@@ -20,6 +20,8 @@ func TestRunDemoPrintsDBFlow(t *testing.T) {
 		"Updated: 1",
 		"Header: [time]",
 		"Values:",
+		"Range [bob, dave]:",
+		"Range row:",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("output missing %q\n%s", want, got)
