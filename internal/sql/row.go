@@ -33,11 +33,10 @@ func (row Row) EncodeKey(schema *Schema) []byte {
 	key = append(key, []byte(schema.Table)...)
 	key = append(key, 0x00)
 	utils.Check(len(row) == len(schema.Cols))
-	for idx, value := range row {
-		if slices.Contains(schema.PKey, idx) {
-			utils.Check(value.Type == schema.Cols[idx].Type)
-			key = row[idx].Encode(key)
-		}
+	for _, idx := range schema.PKey {
+		value := row[idx]
+		utils.Check(value.Type == schema.Cols[idx].Type)
+		key = row[idx].EncodeKey(key)
 	}
 	return key
 }
@@ -49,7 +48,7 @@ func (row Row) EncodeVal(schema *Schema) []byte {
 	for idx, value := range row {
 		if !slices.Contains(schema.PKey, idx) {
 			utils.Check(value.Type == schema.Cols[idx].Type)
-			val = row[idx].Encode(val)
+			val = row[idx].EncodeVal(val)
 		}
 	}
 	return val
@@ -57,8 +56,6 @@ func (row Row) EncodeVal(schema *Schema) []byte {
 
 // DecodeKey decodes a key buffer into the row's primary-key columns.
 func (row Row) DecodeKey(schema *Schema, key []byte) error {
-	var err error
-
 	utils.Check(len(row) == len(schema.Cols))
 	if len(key) < len(schema.Table)+1 {
 		return ErrBadKey
@@ -68,15 +65,13 @@ func (row Row) DecodeKey(schema *Schema, key []byte) error {
 	}
 	key = key[len(schema.Table)+1:]
 
-	for idx, col := range schema.Cols {
-		if !slices.Contains(schema.PKey, idx) {
-			continue
-		}
-		row[idx] = Cell{Type: col.Type}
-		key, err = row[idx].Decode(key)
+	for _, idx := range schema.PKey {
+		row[idx] = Cell{Type: schema.Cols[idx].Type}
+		rest, err := row[idx].DecodeKey(key)
 		if err != nil {
 			return err
 		}
+		key = rest
 	}
 
 	if len(key) != 0 {
@@ -87,18 +82,17 @@ func (row Row) DecodeKey(schema *Schema, key []byte) error {
 
 // DecodeVal decodes a value buffer into the row's non-primary-key columns.
 func (row Row) DecodeVal(schema *Schema, val []byte) error {
-	var err error
-
 	utils.Check(len(row) == len(schema.Cols))
 	for idx, col := range schema.Cols {
 		if slices.Contains(schema.PKey, idx) {
 			continue
 		}
 		row[idx] = Cell{Type: col.Type}
-		val, err = row[idx].Decode(val)
+		rest, err := row[idx].DecodeVal(val)
 		if err != nil {
 			return err
 		}
+		val = rest
 	}
 
 	if len(val) != 0 {
