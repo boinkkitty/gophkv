@@ -1,19 +1,83 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/boinkkitty/gophkv/internal/sql"
 )
 
-// main starts the demo binary.
+// main starts either the interactive SQL terminal or the scripted demo.
 func main() {
-	if err := runDemo(os.Stdout, ".demo_db"); err != nil {
+	var err error
+	if len(os.Args) > 1 && os.Args[1] == "--demo" {
+		err = runDemo(os.Stdout, ".demo_db")
+	} else {
+		err = runTerminal(os.Stdin, os.Stdout, ".demo_db")
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "demo failed: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// runTerminal opens a database and executes semicolon-terminated SQL from r.
+func runTerminal(r io.Reader, w io.Writer, file string) error {
+	db := sql.DB{}
+	db.KV.Log.FileName = file
+	defer os.Remove(file)
+
+	if err := db.Open(); err != nil {
+		return err
+	}
+	defer db.Close()
+
+	reader := bufio.NewReader(r)
+	var stmt strings.Builder
+	for {
+		fmt.Fprint(w, "SQL> ")
+		line, err := reader.ReadString('\n')
+		stmt.WriteString(line)
+		if strings.Contains(line, ";") {
+			sqlText := strings.TrimSpace(stmt.String())
+			stmt.Reset()
+			if sqlText == "" {
+				if err == io.EOF {
+					return nil
+				}
+				continue
+			}
+
+			p := sql.NewParser(sqlText)
+			parsed, parseErr := p.ParseStmt()
+			if parseErr != nil {
+				fmt.Fprintf(w, "Error: %v\n", parseErr)
+			} else {
+				result, execErr := db.ExecStmt(parsed)
+				if execErr != nil {
+					fmt.Fprintf(w, "Error: %v\n", execErr)
+				} else {
+					fmt.Fprintf(w, "Updated: %d\n", result.Updated)
+					if len(result.Header) > 0 {
+						fmt.Fprintf(w, "Header: %v\n", result.Header)
+					}
+					if len(result.Values) > 0 {
+						fmt.Fprintf(w, "Values: %v\n", result.Values)
+					}
+				}
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // runDemo opens a demo database, executes a few SQL statements, and prints the results.
